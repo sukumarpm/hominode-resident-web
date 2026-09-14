@@ -1,0 +1,75 @@
+{
+  "hosting": {
+    "target": "hominode_prod",
+    "public": "dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "headers": [
+      {
+        "source": "/assets/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public,max-age=31536000,immutable"
+          }
+        ]
+      },
+      {
+        "source": "**",
+        "headers": [
+          {
+            "key": "X-Content-Type-Options",
+            "value": "nosniff"
+          },
+          {
+            "key": "Referrer-Policy",
+            "value": "strict-origin-when-cross-origin"
+          }
+        ]
+      },
+      {
+        "source": "/index.html",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      },
+      {
+        "source": "/__resident_app/index.html",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "/privacy",
+        "destination": "/assets/HOMINODE_Privacy_Policy_v1.0.pdf"
+      },
+      {
+        "source": "/policy",
+        "destination": "/assets/HOMINODE_Privacy_Policy_v1.0.pdf"
+      },
+      {
+        "regex": "^/(?:admin|about|api|app|assets|auth|c|cdn|contact|docs|features|firebase|help|home|legal|login|mail|pricing|privacy|resident|static|status|support|super-admin|terms|www)(?:/.*)?$",
+        "destination": "/index.html"
+      },
+      {
+        "regex": "^/[a-z0-9]+(?:-[a-z0-9]+)*(?:/.*)?$",
+        "destination": "/__resident_app/index.html"
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
