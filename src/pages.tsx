@@ -218,44 +218,217 @@ export function facilityPrice(data: Data, s: Session) {
   if (data.isFree === false) return dailyFacilityPrice(data.pricePerDay);
   return 'Price unavailable';
 }
+type FacilityPhoto = {
+  url: string;
+  storagePath?: string;
+  name?: string;
+};
+
+function facilityImages(data: Data): FacilityPhoto[] {
+  const managed = Array.isArray(data.images)
+    ? data.images.flatMap((value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+
+      const image = value as Record<string, unknown>;
+      const url = safeUrl(image.url);
+      if (!url) return [];
+
+      return [
+        {
+          url,
+          storagePath: str(image.storagePath) || undefined,
+          name: str(image.name) || undefined,
+        },
+      ];
+    })
+    : [];
+
+  if (managed.length) return managed.slice(0, 6);
+
+  // Legacy compatibility for facilities created before managed galleries existed.
+  const legacy = safeUrl(data.imageUrl);
+  return legacy ? [{ url: legacy }] : [];
+}
+
 function FacilityImage({ data }: { data: Data }) {
-  const url = safeUrl(data.imageUrl);
+  const photos = facilityImages(data);
+  const primary = photos[0]?.url;
   const [failedUrl, setFailedUrl] = useState<string>();
   const iconName = str(data.iconName);
-  const Icon = iconName === 'fitness_center' || iconName === 'gym'
-    ? Dumbbell
-    : iconName === 'pool' ? Waves : Building2;
+  const Icon =
+    iconName === 'fitness_center' || iconName === 'gym'
+      ? Dumbbell
+      : iconName === 'pool'
+        ? Waves
+        : Building2;
+
   return (
-    <div className="facility-image">
-      {url && url !== failedUrl ? (
-        <img loading="lazy" src={url} alt="" onError={() => setFailedUrl(url)} />
+    <div className="facility-image facility-resident-image">
+      {primary && primary !== failedUrl ? (
+        <img
+          loading="lazy"
+          src={primary}
+          alt={str(data.name) || 'Facility'}
+          onError={() => setFailedUrl(primary)}
+        />
       ) : (
-        <Icon size={44} aria-label="Facility image unavailable" />
+        <div className="facility-image-placeholder">
+          <Icon size={44} aria-label="Facility image unavailable" />
+          <span>No photo available</span>
+        </div>
+      )}
+
+      {photos.length > 1 && (
+        <span className="facility-photo-count" aria-label={`${photos.length} facility photos`}>
+          1 / {photos.length}
+        </span>
       )}
     </div>
   );
 }
+
+function FacilityGallery({ data }: { data: Data }) {
+  const photos = facilityImages(data);
+  const [selected, setSelected] = useState(0);
+  const [failedUrl, setFailedUrl] = useState<string>();
+  const facilityName = str(data.name) || 'Facility';
+
+  useEffect(() => {
+    setSelected(0);
+    setFailedUrl(undefined);
+  }, [data]);
+
+  // The card already exposes the generic "Facility image unavailable" label.
+  // Keep the detail placeholder accessible without duplicating that exact label,
+  // so screen readers and tests do not see two identically named controls/icons.
+  if (!photos.length) {
+    return (
+      <div className="facility-detail-main-image facility-detail-empty-image">
+        <div className="facility-image-placeholder">
+          <Building2 size={48} aria-hidden="true" />
+          <span>No photo available</span>
+        </div>
+      </div>
+    );
+  }
+
+  const safeSelected = Math.min(selected, photos.length - 1);
+  const current = photos[safeSelected];
+
+  return (
+    <section
+      className="facility-detail-gallery"
+      aria-label={`${facilityName} photos`}
+    >
+      <div className="facility-detail-main-image">
+        {current.url !== failedUrl ? (
+          <img
+            src={current.url}
+            alt={`${facilityName} photo ${safeSelected + 1}`}
+            onError={() => setFailedUrl(current.url)}
+          />
+        ) : (
+          <div className="facility-image-placeholder">
+            <Building2 size={48} aria-hidden="true" />
+            <span>Photo unavailable</span>
+          </div>
+        )}
+
+        {photos.length > 1 && (
+          <span className="facility-photo-count">
+            {safeSelected + 1} / {photos.length}
+          </span>
+        )}
+      </div>
+
+      {photos.length > 1 && (
+        <div className="facility-detail-thumbnails">
+          {photos.map((photo, index) => (
+            <button
+              type="button"
+              key={`${photo.storagePath || photo.url}:${index}`}
+              className={index === safeSelected ? 'active' : ''}
+              aria-label={`View facility photo ${index + 1}`}
+              aria-pressed={index === safeSelected}
+              onClick={() => {
+                setSelected(index);
+                setFailedUrl(undefined);
+              }}
+            >
+              <img src={photo.url} alt="" loading="lazy" />
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function FacilityFields({ data, s }: { data: Data; s: Session }) {
   const list = (value: unknown) =>
     Array.isArray(value)
       ? value.filter((item): item is string => typeof item === 'string' && !!item.trim())
       : [];
+
+  const residentType = facilityResidentType(s);
+  const timeSlots = list(data.timeSlots);
+  const durations = list(data.bookingDurations);
+  const amenities = list(data.amenities ?? data.features ?? data.facilities);
+  const applicablePrice = facilityPrice(data, s);
+  const capacity =
+    typeof data.maxCapacity === 'number' &&
+      Number.isFinite(data.maxCapacity) &&
+      data.maxCapacity > 0
+      ? String(data.maxCapacity)
+      : '';
+
   const fields: [string, string][] = [
     ['Name', str(data.name)],
-    ['Type', str(data.type)],
-    ['Description', str(data.description)],
+    ['Facility type', str(data.type)],
     ['Building', str(data.buildingName)],
-    ['Daily price', facilityPrice(data, s)],
-    ['Time slots', list(data.timeSlots).join(', ')],
-    ['Booking durations', list(data.bookingDurations).join(', ')],
-    ['Capacity', typeof data.maxCapacity === 'number' && Number.isFinite(data.maxCapacity) && data.maxCapacity > 0 ? String(data.maxCapacity) : ''],
-    ['Available', data.isAvailable === true ? 'Yes' : data.isAvailable === false ? 'No' : 'Unspecified'],
+    ['Location', str(data.location)],
+    ['Description', str(data.description)],
+    [
+      residentType === 'owner'
+        ? 'Your Owner fee'
+        : residentType === 'tenant'
+          ? 'Your Tenant / Lease fee'
+          : 'Daily price',
+      applicablePrice,
+    ],
+    ['Time slots', timeSlots.join(', ')],
+    ['Booking durations', durations.join(', ')],
+    ['Booking rule', str(data.bookingRule) || str(data.bookingType)],
+    ['Capacity', capacity],
+    ['Amenities', amenities.join(', ')],
+    [
+      'Multiple bookings',
+      data.allowMultipleBookings === true
+        ? 'Allowed'
+        : data.allowMultipleBookings === false
+          ? 'Not allowed'
+          : '',
+    ],
+    [
+      'Availability',
+      data.isAvailable === true
+        ? 'Yes'
+        : data.isAvailable === false
+          ? 'No'
+          : 'Unspecified',
+    ],
   ];
+
   return (
-    <dl className="detail-fields">
-      {fields.filter(([, value]) => value).map(([label, value]) => (
-        <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
-      ))}
+    <dl className="detail-fields facility-detail-fields">
+      {fields
+        .filter(([, value]) => value)
+        .map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
     </dl>
   );
 }
@@ -315,12 +488,10 @@ function facilityPackagePrices(data: Data) {
 function FacilityCard({
   row,
   s,
-  base,
   onOpen,
 }: {
   row: Row;
   s: Session;
-  base: string;
   onOpen: () => void;
 }) {
   const data = row.data;
@@ -440,13 +611,13 @@ function FacilityCard({
         )}
 
         <div className="facility-card-actions">
-          <button type="button" className="facility-secondary-action" onClick={onOpen}>
+          <button
+            type="button"
+            className="facility-secondary-action"
+            onClick={onOpen}
+          >
             View details
           </button>
-          <Link className="facility-primary-action" to={base + 'bookings'}>
-            <CalendarDays size={16} />
-            My bookings
-          </Link>
         </div>
       </div>
     </article>
@@ -691,7 +862,6 @@ function ScopedModule({
                   key={row.id}
                   row={row}
                   s={s}
-                  base={base}
                   onOpen={() => setParams({ record: row.id })}
                 />
               ))}
@@ -747,11 +917,6 @@ function ScopedModule({
           {module === 'buildings' && (
             <Link className="outline-link" to={base + 'units'}>
               View units <ArrowRight size={16} />
-            </Link>
-          )}
-          {module === 'facilities' && (
-            <Link className="outline-link" to={base + 'bookings'}>
-              My bookings <ArrowRight size={16} />
             </Link>
           )}
           {canCreate(s, module) && (
@@ -838,9 +1003,6 @@ function ScopedModule({
                   key={row.id}
                   onClick={() => setParams({ record: row.id })}
                 >
-                  {module === 'facilities' && (
-                    <FacilityImage data={row.data} />
-                  )}
                   <div className="module-card-body">
                     <div className="card-heading">
                       <span className="record-icon">
@@ -852,15 +1014,9 @@ function ScopedModule({
                           <FileText />
                         )}
                       </span>
-                      <Pill value={module === 'facilities' ? (row.data.isAvailable === true ? 'Available' : 'Unavailable') : status(row.data)} />
+                      <Pill value={status(row.data)} />
                     </div>
                     <h3>{titleOf(row.data)}</h3>
-                    {module === 'facilities' && (
-                      <>
-                        <p>{[str(row.data.type), str(row.data.buildingName)].filter(Boolean).join(' · ')}</p>
-                        <p>{facilityPrice(row.data, s)}</p>
-                      </>
-                    )}
                     <p>
                       {first(
                         row.data,
@@ -1184,7 +1340,14 @@ function RecordDetails({
   return (
     <Modal title={titleOf(d)} onClose={onClose}>
       <Pill value={module === 'facilities' ? (d.isAvailable === true ? 'Available' : 'Unavailable') : status(d)} />
-      {module === 'facilities' ? <FacilityFields data={d} s={s} /> : <DetailFields data={d} />}
+      {module === 'facilities' ? (
+        <div className="resident-facility-details">
+          <FacilityGallery data={d} />
+          <FacilityFields data={d} s={s} />
+        </div>
+      ) : (
+        <DetailFields data={d} />
+      )}
       {module === 'complaints' && (
         <ol className="timeline">
           <li>
