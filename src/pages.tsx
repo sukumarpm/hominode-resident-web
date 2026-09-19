@@ -252,7 +252,7 @@ function facilityImages(data: Data): FacilityPhoto[] {
 
 function FacilityImage({ data }: { data: Data }) {
   const photos = facilityImages(data);
-  const primary = photos[0]?.url;
+  const [selected, setSelected] = useState(0);
   const [failedUrl, setFailedUrl] = useState<string>();
   const iconName = str(data.iconName);
   const Icon =
@@ -262,14 +262,45 @@ function FacilityImage({ data }: { data: Data }) {
         ? Waves
         : Building2;
 
+  useEffect(() => {
+    setSelected(0);
+    setFailedUrl(undefined);
+  }, [data]);
+
+  useEffect(() => {
+    if (photos.length < 2) return;
+
+    const timer = window.setInterval(() => {
+      setSelected((index) => (index + 1) % photos.length);
+      setFailedUrl(undefined);
+    }, 4000);
+
+    return () => window.clearInterval(timer);
+  }, [photos.length]);
+
+  const safeSelected = photos.length ? Math.min(selected, photos.length - 1) : 0;
+  const current = photos[safeSelected];
+
+  function previousPhoto() {
+    if (photos.length < 2) return;
+    setSelected((index) => (index - 1 + photos.length) % photos.length);
+    setFailedUrl(undefined);
+  }
+
+  function nextPhoto() {
+    if (photos.length < 2) return;
+    setSelected((index) => (index + 1) % photos.length);
+    setFailedUrl(undefined);
+  }
+
   return (
-    <div className="facility-image facility-resident-image">
-      {primary && primary !== failedUrl ? (
+    <div className="facility-image facility-resident-image facility-card-carousel">
+      {current?.url && current.url !== failedUrl ? (
         <img
           loading="lazy"
-          src={primary}
+          src={current.url}
           alt={str(data.name) || 'Facility'}
-          onError={() => setFailedUrl(primary)}
+          onError={() => setFailedUrl(current.url)}
         />
       ) : (
         <div className="facility-image-placeholder">
@@ -279,9 +310,48 @@ function FacilityImage({ data }: { data: Data }) {
       )}
 
       {photos.length > 1 && (
-        <span className="facility-photo-count" aria-label={`${photos.length} facility photos`}>
-          1 / {photos.length}
-        </span>
+        <>
+          <button
+            type="button"
+            className="facility-carousel-arrow previous"
+            aria-label="Previous facility photo"
+            onClick={previousPhoto}
+          >
+            <span aria-hidden="true">‹</span>
+          </button>
+
+          <button
+            type="button"
+            className="facility-carousel-arrow next"
+            aria-label="Next facility photo"
+            onClick={nextPhoto}
+          >
+            <span aria-hidden="true">›</span>
+          </button>
+
+          <div className="facility-carousel-dots" aria-label="Facility photo carousel">
+            {photos.map((photo, index) => (
+              <button
+                type="button"
+                key={`${photo.storagePath || photo.url}:${index}`}
+                className={index === safeSelected ? 'active' : ''}
+                aria-label={`Show facility photo ${index + 1}`}
+                aria-pressed={index === safeSelected}
+                onClick={() => {
+                  setSelected(index);
+                  setFailedUrl(undefined);
+                }}
+              />
+            ))}
+          </div>
+
+          <span
+            className="facility-photo-count"
+            aria-label={`Photo ${safeSelected + 1} of ${photos.length}`}
+          >
+            {safeSelected + 1} / {photos.length}
+          </span>
+        </>
       )}
     </div>
   );

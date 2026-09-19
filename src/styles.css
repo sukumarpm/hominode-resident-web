@@ -3682,3 +3682,130 @@ dialog::backdrop {
     grid-template-columns: 1fr;
   }
 }
+
+/* Resident facility card carousel */
+.facility-card-carousel {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.facility-card-carousel>img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.facility-carousel-arrow {
+  position: absolute;
+  top: 50%;
+  z-index: 4;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 50%;
+  background: rgba(12, 30, 59, 0.54);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  transform: translateY(-50%);
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  opacity: 0.88;
+  transition:
+    background 160ms ease,
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.facility-carousel-arrow:hover,
+.facility-carousel-arrow:focus-visible {
+  background: rgba(12, 30, 59, 0.78);
+  opacity: 1;
+}
+
+.facility-carousel-arrow:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.facility-carousel-arrow.previous {
+  left: 10px;
+}
+
+.facility-carousel-arrow.next {
+  right: 10px;
+}
+
+.facility-carousel-arrow span {
+  margin-top: -2px;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.facility-carousel-dots {
+  position: absolute;
+  left: 50%;
+  bottom: 11px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transform: translateX(-50%);
+}
+
+.facility-carousel-dots button {
+  width: 7px;
+  height: 7px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.68);
+  box-shadow: 0 1px 3px rgba(13, 35, 70, 0.22);
+  cursor: pointer;
+  transition:
+    width 160ms ease,
+    background 160ms ease;
+}
+
+.facility-carousel-dots button.active {
+  width: 20px;
+  background: #fff;
+}
+
+.facility-photo-count {
+  position: absolute;
+  right: 10px;
+  bottom: 9px;
+  z-index: 4;
+  min-width: 42px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(12, 30, 59, 0.62);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  backdrop-filter: blur(6px);
+}
+
+@media (max-width: 720px) {
+  .facility-carousel-arrow {
+    width: 32px;
+    height: 32px;
+  }
+
+  .facility-carousel-arrow.previous {
+    left: 8px;
+  }
+
+  .facility-carousel-arrow.next {
+    right: 8px;
+  }
+}
