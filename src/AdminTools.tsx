@@ -78,7 +78,7 @@ function CreateRecord({
           throw Error('Onboarding could not be confirmed. Contact support before retrying.');
         setResult(
           'Resident onboarding created. The resident can continue registration and any required identity verification in the mobile app. Reference: ' +
-          response.onboardingId,
+            response.onboardingId,
         );
       } else {
         const floors = structure === 'apartment_building' ? Number(v.floors) : 1;

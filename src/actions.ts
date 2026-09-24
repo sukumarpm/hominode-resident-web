@@ -224,15 +224,12 @@ export async function submitProof(session: Session, billId: string, file: File) 
   } catch {
     throw Error(
       'The receipt uploaded, but the payment submission failed. Contact management with reference ' +
-      payment.id +
-      ' before retrying.',
+        payment.id +
+        ' before retrying.',
     );
   }
 }
-export async function latestPaymentForBill(
-  session: Session,
-  billId: string,
-): Promise<Data | null> {
+export async function latestPaymentForBill(session: Session, billId: string): Promise<Data | null> {
   console.log('[BillingPaymentStatus] starting', { billId });
 
   const s = await currentAuthority(session);

@@ -370,7 +370,7 @@ dd {
   font-size: 12px;
 }
 
-.sidebar-profile>a {
+.sidebar-profile > a {
   display: flex;
   gap: 10px;
   align-items: center;
@@ -500,7 +500,7 @@ dd {
   position: relative;
 }
 
-.notification-button>span {
+.notification-button > span {
   position: absolute;
   right: 2px;
   top: 0;
@@ -585,7 +585,7 @@ main {
   min-width: 0;
 }
 
-.card-heading>a {
+.card-heading > a {
   font-size: 11px;
   white-space: nowrap;
   display: flex;
@@ -652,7 +652,7 @@ main {
   padding: 8px 45px 12px 0;
 }
 
-.collection-bubbles>div {
+.collection-bubbles > div {
   position: relative;
   z-index: 1;
   width: 130px;
@@ -668,12 +668,12 @@ main {
   flex-shrink: 1;
 }
 
-.collection-bubbles>div strong {
+.collection-bubbles > div strong {
   font-size: 17px;
   white-space: nowrap;
 }
 
-.collection-bubbles>div span {
+.collection-bubbles > div span {
   font-size: 12px;
 }
 
@@ -722,14 +722,16 @@ main {
   gap: 13px;
   padding: 3px 15px 0;
   border-bottom: 1px solid #dce8f8;
-  background: repeating-linear-gradient(to top,
-      transparent 0,
-      transparent 35px,
-      #dce8f870 36px,
-      #dce8f870 37px);
+  background: repeating-linear-gradient(
+    to top,
+    transparent 0,
+    transparent 35px,
+    #dce8f870 36px,
+    #dce8f870 37px
+  );
 }
 
-.bar-chart>div {
+.bar-chart > div {
   height: 100%;
   flex: 1;
   display: flex;
@@ -775,7 +777,7 @@ main {
   flex-shrink: 0;
 }
 
-.donut>div {
+.donut > div {
   height: 100%;
   width: 100%;
   border-radius: 50%;
@@ -801,7 +803,7 @@ main {
   font-size: 10px;
 }
 
-.occupancy dl>div {
+.occupancy dl > div {
   display: flex;
   gap: 8px;
   justify-content: space-between;
@@ -817,11 +819,11 @@ main {
   margin-right: 7px;
 }
 
-.occupancy dl>div:nth-child(2) dt:before {
+.occupancy dl > div:nth-child(2) dt:before {
   background: #13bdac;
 }
 
-.occupancy dl>div:nth-child(3) dt:before {
+.occupancy dl > div:nth-child(3) dt:before {
   background: #f3bb2e;
 }
 
@@ -883,14 +885,14 @@ main {
   color: #f32545;
 }
 
-.metric>div {
+.metric > div {
   display: flex;
   flex-direction: column;
   gap: 6px;
   min-width: 0;
 }
 
-.metric>div>span {
+.metric > div > span {
   font-size: 10px;
   line-height: 1.4;
 }
@@ -935,7 +937,7 @@ main {
   font-size: 13px;
 }
 
-.record>div {
+.record > div {
   min-width: 0;
   flex: 1;
 }
@@ -1028,7 +1030,7 @@ main {
   min-height: 91px;
 }
 
-.quick-action>span {
+.quick-action > span {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1066,7 +1068,7 @@ main {
   color: #09244d;
 }
 
-.community-banner>span {
+.community-banner > span {
   font-size: 11px;
   color: #1f6bac;
 }
@@ -1185,7 +1187,7 @@ main {
   margin-bottom: 22px;
 }
 
-.filters>label:nth-child(2) {
+.filters > label:nth-child(2) {
   width: 170px;
 }
 
@@ -1244,7 +1246,7 @@ tbody th {
   font-weight: 500;
 }
 
-tbody tr:last-child>* {
+tbody tr:last-child > * {
   border-bottom: 0;
 }
 
@@ -1370,7 +1372,7 @@ tbody .text-button {
   gap: 0;
 }
 
-.detail-fields>div {
+.detail-fields > div {
   display: grid;
   grid-template-columns: 140px 1fr;
   gap: 20px;
@@ -1512,7 +1514,7 @@ dialog::backdrop {
   padding: 35px;
 }
 
-.sos-intro>svg {
+.sos-intro > svg {
   color: #cd3040;
 }
 
@@ -1527,7 +1529,7 @@ dialog::backdrop {
   padding: 20px;
 }
 
-.sos-list article>header {
+.sos-list article > header {
   display: flex;
   align-items: center;
   gap: 14px;
@@ -1607,7 +1609,7 @@ dialog::backdrop {
   color: white;
 }
 
-.login-story>img {
+.login-story > img {
   width: 80px;
   height: 95px;
   object-fit: contain;
@@ -1636,7 +1638,7 @@ dialog::backdrop {
   margin: 12px 0;
 }
 
-.login-form>p {
+.login-form > p {
   margin-bottom: 25px;
 }
 
@@ -1672,7 +1674,7 @@ dialog::backdrop {
     url('/images/community.png') center/cover;
 }
 
-.landing>img {
+.landing > img {
   width: 75px;
   height: 100px;
   object-fit: contain;
@@ -1738,7 +1740,7 @@ dialog::backdrop {
 .collapsed .sidebar nav a span,
 .collapsed .brand span,
 .collapsed .brand strong,
-.collapsed .sidebar-profile>a>span:last-child,
+.collapsed .sidebar-profile > a > span:last-child,
 .collapsed .sidebar-profile button span {
   display: none;
 }
@@ -1752,7 +1754,7 @@ dialog::backdrop {
   padding-inline: 2px;
 }
 
-.collapsed .sidebar-profile>a {
+.collapsed .sidebar-profile > a {
   justify-content: center;
 }
 
@@ -1868,7 +1870,7 @@ dialog::backdrop {
   box-shadow: 0 3px 20px #59482b06;
 }
 
-.resident .card-heading>a {
+.resident .card-heading > a {
   color: #006bfa;
 }
 
@@ -1877,7 +1879,7 @@ dialog::backdrop {
   gap: 13px;
 }
 
-.apartment-card .card-heading>div {
+.apartment-card .card-heading > div {
   flex: 1;
 }
 
@@ -1922,7 +1924,7 @@ dialog::backdrop {
   gap: 8px;
 }
 
-.apartment-metrics .metric>div>span {
+.apartment-metrics .metric > div > span {
   font-size: 9px;
 }
 
@@ -1989,7 +1991,7 @@ dialog::backdrop {
   font-weight: 600;
 }
 
-.community-banner.lifestyle>span {
+.community-banner.lifestyle > span {
   color: white;
   font-size: 11px;
 }
@@ -2013,20 +2015,20 @@ dialog::backdrop {
   background: #fff0f0;
 }
 
-.resident .quick-action.tone-1>span,
-.resident .quick-action.tone-5>span {
+.resident .quick-action.tone-1 > span,
+.resident .quick-action.tone-5 > span {
   color: #158649;
 }
 
-.resident .quick-action.tone-2>span {
+.resident .quick-action.tone-2 > span {
   color: #6541ff;
 }
 
-.resident .quick-action.tone-3>span {
+.resident .quick-action.tone-3 > span {
   color: #fa233e;
 }
 
-.resident .quick-action>span {
+.resident .quick-action > span {
   border: 0;
   background: none;
   width: 30px;
@@ -2073,7 +2075,7 @@ dialog::backdrop {
   gap: 9px;
 }
 
-.booking-cards>a {
+.booking-cards > a {
   color: inherit;
   min-width: 0;
 }
@@ -2176,7 +2178,7 @@ dialog::backdrop {
     padding-block: 18px;
   }
 
-  .collection-bubbles>div {
+  .collection-bubbles > div {
     width: 145px;
     height: 145px;
   }
@@ -2236,7 +2238,7 @@ dialog::backdrop {
     padding-bottom: 32px;
   }
 
-  .collection-bubbles>div {
+  .collection-bubbles > div {
     width: 107px;
     height: 107px;
   }
@@ -2247,7 +2249,7 @@ dialog::backdrop {
     margin-inline: 12px;
   }
 
-  .collection-bubbles>div strong {
+  .collection-bubbles > div strong {
     font-size: 14px;
   }
 
@@ -2262,7 +2264,7 @@ dialog::backdrop {
     gap: 8px;
   }
 
-  .occupancy dl>div {
+  .occupancy dl > div {
     padding-inline: 8px;
   }
 
@@ -2284,7 +2286,7 @@ dialog::backdrop {
     grid-template-columns: 1.1fr 1fr;
   }
 
-  .resident-dashboard>.resident-column:last-child {
+  .resident-dashboard > .resident-column:last-child {
     grid-column: 1/-1;
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
@@ -2298,7 +2300,7 @@ dialog::backdrop {
     min-height: 235px;
   }
 
-  .resident-dashboard>.resident-column:last-child>.card {
+  .resident-dashboard > .resident-column:last-child > .card {
     height: 100%;
   }
 
@@ -2374,11 +2376,11 @@ dialog::backdrop {
     flex-direction: row;
   }
 
-  .resident-dashboard>.resident-column:last-child {
+  .resident-dashboard > .resident-column:last-child {
     grid-template-columns: 1fr 1fr;
   }
 
-  .resident-dashboard>.resident-column:last-child .green-banner {
+  .resident-dashboard > .resident-column:last-child .green-banner {
     grid-column: 1/-1;
     min-height: 180px;
   }
@@ -2417,7 +2419,6 @@ dialog::backdrop {
 }
 
 @media (max-width: 800px) {
-
   .app,
   .collapsed {
     --sidebar: 0px;
@@ -2463,7 +2464,7 @@ dialog::backdrop {
     padding: 5px 9px;
   }
 
-  .community-select>svg {
+  .community-select > svg {
     display: none;
   }
 
@@ -2590,7 +2591,7 @@ dialog::backdrop {
     font-size: 10px;
   }
 
-  .global-search>svg {
+  .global-search > svg {
     display: none;
   }
 
@@ -2645,7 +2646,7 @@ dialog::backdrop {
     padding-block: 20px 33px;
   }
 
-  .collection-bubbles>div {
+  .collection-bubbles > div {
     width: 90px;
     height: 90px;
   }
@@ -2656,11 +2657,11 @@ dialog::backdrop {
     margin-inline: 7px;
   }
 
-  .collection-bubbles>div strong {
+  .collection-bubbles > div strong {
     font-size: 12px;
   }
 
-  .collection-bubbles>div span {
+  .collection-bubbles > div span {
     font-size: 10px;
   }
 
@@ -2678,7 +2679,7 @@ dialog::backdrop {
     gap: 10px;
   }
 
-  .metric>div>span {
+  .metric > div > span {
     font-size: 11px;
   }
 
@@ -2714,7 +2715,7 @@ dialog::backdrop {
     grid-template-columns: 1fr;
   }
 
-  .resident-dashboard>.resident-column:last-child {
+  .resident-dashboard > .resident-column:last-child {
     grid-column: auto;
     display: flex;
   }
@@ -2800,7 +2801,7 @@ dialog::backdrop {
     min-width: 150px;
   }
 
-  .filters>label:nth-child(2) {
+  .filters > label:nth-child(2) {
     width: 120px;
   }
 
@@ -2835,12 +2836,12 @@ dialog::backdrop {
     width: 100%;
   }
 
-  .page-actions>.primary,
-  .page-actions>.outline-link {
+  .page-actions > .primary,
+  .page-actions > .outline-link {
     flex: 1;
   }
 
-  .detail-fields>div {
+  .detail-fields > div {
     grid-template-columns: 100px 1fr;
     gap: 14px;
   }
@@ -2865,7 +2866,7 @@ dialog::backdrop {
     padding: 15px;
   }
 
-  .sos-list article>header {
+  .sos-list article > header {
     gap: 9px;
   }
 
@@ -2883,7 +2884,7 @@ dialog::backdrop {
     background-position: center;
   }
 
-  .login-story>img {
+  .login-story > img {
     width: 50px;
     height: 65px;
   }
@@ -2922,7 +2923,6 @@ dialog::backdrop {
 }
 
 @media (prefers-reduced-motion: reduce) {
-
   *,
   *:before,
   *:after {
@@ -2937,7 +2937,7 @@ dialog::backdrop {
   margin: 20px 0;
 }
 
-.import-results>div {
+.import-results > div {
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
 }
@@ -3068,7 +3068,13 @@ dialog::backdrop {
   border: 1px solid rgba(215, 225, 238, 0.9);
   border-radius: 22px;
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.94) 44%, rgba(255, 255, 255, 0.26) 72%, rgba(255, 255, 255, 0.08) 100%),
+    linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.98) 0%,
+      rgba(255, 255, 255, 0.94) 44%,
+      rgba(255, 255, 255, 0.26) 72%,
+      rgba(255, 255, 255, 0.08) 100%
+    ),
     url('/images/community.png') right center / 55% 100% no-repeat,
     #f8fbff;
   box-shadow: 0 7px 28px rgba(39, 66, 104, 0.07);
@@ -3100,7 +3106,7 @@ dialog::backdrop {
   color: #0c214f;
 }
 
-.facilities-hero-copy>p:last-child {
+.facilities-hero-copy > p:last-child {
   margin-top: 6px;
   color: #61769c;
   font-size: 14px;
@@ -3273,7 +3279,9 @@ dialog::backdrop {
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 5px 20px rgba(33, 56, 89, 0.07);
-  transition: transform 160ms ease, box-shadow 160ms ease;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .facility-showcase-card:hover {
@@ -3365,7 +3373,7 @@ dialog::backdrop {
   color: #1944a7;
 }
 
-.facility-title-row>div {
+.facility-title-row > div {
   min-width: 0;
 }
 
@@ -3394,7 +3402,7 @@ dialog::backdrop {
   margin-top: 11px;
 }
 
-.facility-meta-grid>div {
+.facility-meta-grid > div {
   min-width: 0;
   min-height: 54px;
   padding: 9px 10px;
@@ -3568,7 +3576,7 @@ dialog::backdrop {
     grid-template-columns: 1fr;
   }
 
-  .facility-meta-grid>div {
+  .facility-meta-grid > div {
     min-height: 45px;
   }
 
@@ -3592,7 +3600,12 @@ dialog::backdrop {
     min-height: 150px;
     padding: 22px;
     background:
-      linear-gradient(90deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.9) 62%, rgba(255, 255, 255, 0.35) 100%),
+      linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.98) 0%,
+        rgba(255, 255, 255, 0.9) 62%,
+        rgba(255, 255, 255, 0.35) 100%
+      ),
       url('/images/community.png') right center / cover no-repeat;
   }
 
@@ -3637,7 +3650,7 @@ dialog::backdrop {
     font-size: 29px;
   }
 
-  .facilities-hero-copy>p:last-child {
+  .facilities-hero-copy > p:last-child {
     max-width: 280px;
     font-size: 11px;
   }
@@ -3691,7 +3704,7 @@ dialog::backdrop {
   overflow: hidden;
 }
 
-.facility-card-carousel>img {
+.facility-card-carousel > img {
   width: 100%;
   height: 100%;
   display: block;

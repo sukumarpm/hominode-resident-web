@@ -17,8 +17,7 @@ export function firebaseConfig(env: Record<string, string | undefined>) {
 function initialize() {
   const app = getApps()[0] || initializeApp(firebaseConfig(import.meta.env));
   const appCheckDebugEnabled =
-    import.meta.env.DEV ||
-    import.meta.env.VITE_APPCHECK_DEBUG === 'true';
+    import.meta.env.DEV || import.meta.env.VITE_APPCHECK_DEBUG === 'true';
 
   if (appCheckDebugEnabled) {
     const debugGlobal = globalThis as typeof globalThis & {
@@ -30,7 +29,7 @@ function initialize() {
   initializeAppCheck(app, {
     provider: new ReCaptchaEnterpriseProvider(
       import.meta.env.VITE_RECAPTCHA_ENTERPRISE_SITE_KEY ||
-      '6LfLtJstAAAAAFM2jk9KvFB-2f7zUr9DCNIl7HqN',
+        '6LfLtJstAAAAAFM2jk9KvFB-2f7zUr9DCNIl7HqN',
     ),
     isTokenAutoRefreshEnabled: true,
   });

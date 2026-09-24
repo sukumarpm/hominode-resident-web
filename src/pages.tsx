@@ -29,7 +29,7 @@ import {
   receiptBlob,
   residentLifecycle,
   submitProof,
-  updateScoped
+  updateScoped,
 } from './actions';
 import { AdminCreateButtons, ResidentReview } from './AdminTools';
 import { Card, Modal, Pill, State } from './components';
@@ -227,20 +227,20 @@ type FacilityPhoto = {
 function facilityImages(data: Data): FacilityPhoto[] {
   const managed = Array.isArray(data.images)
     ? data.images.flatMap((value) => {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
 
-      const image = value as Record<string, unknown>;
-      const url = safeUrl(image.url);
-      if (!url) return [];
+        const image = value as Record<string, unknown>;
+        const url = safeUrl(image.url);
+        if (!url) return [];
 
-      return [
-        {
-          url,
-          storagePath: str(image.storagePath) || undefined,
-          name: str(image.name) || undefined,
-        },
-      ];
-    })
+        return [
+          {
+            url,
+            storagePath: str(image.storagePath) || undefined,
+            name: str(image.name) || undefined,
+          },
+        ];
+      })
     : [];
 
   if (managed.length) return managed.slice(0, 6);
@@ -386,10 +386,7 @@ function FacilityGallery({ data }: { data: Data }) {
   const current = photos[safeSelected];
 
   return (
-    <section
-      className="facility-detail-gallery"
-      aria-label={`${facilityName} photos`}
-    >
+    <section className="facility-detail-gallery" aria-label={`${facilityName} photos`}>
       <div className="facility-detail-main-image">
         {current.url !== failedUrl ? (
           <img
@@ -447,8 +444,8 @@ function FacilityFields({ data, s }: { data: Data; s: Session }) {
   const applicablePrice = facilityPrice(data, s);
   const capacity =
     typeof data.maxCapacity === 'number' &&
-      Number.isFinite(data.maxCapacity) &&
-      data.maxCapacity > 0
+    Number.isFinite(data.maxCapacity) &&
+    data.maxCapacity > 0
       ? String(data.maxCapacity)
       : '';
 
@@ -481,11 +478,7 @@ function FacilityFields({ data, s }: { data: Data; s: Session }) {
     ],
     [
       'Availability',
-      data.isAvailable === true
-        ? 'Yes'
-        : data.isAvailable === false
-          ? 'No'
-          : 'Unspecified',
+      data.isAvailable === true ? 'Yes' : data.isAvailable === false ? 'No' : 'Unspecified',
     ],
   ];
 
@@ -517,9 +510,7 @@ function facilityCategoryOf(data: Data): Exclude<FacilityCategory, 'all'> {
   const type = str(data.type).trim().toLowerCase();
 
   if (
-    ['swimming', 'pool', 'playground', 'garden', 'park', 'lawn'].some((word) =>
-      type.includes(word),
-    )
+    ['swimming', 'pool', 'playground', 'garden', 'park', 'lawn'].some((word) => type.includes(word))
   ) {
     return 'outdoor';
   }
@@ -549,21 +540,13 @@ function facilityPackagePrices(data: Data) {
   return Object.entries(raw as Record<string, unknown>)
     .map(([label, value]) => {
       const price = nonNegativeFacilityPrice(value);
-      return price == null ? null : [label, money(price)] as const;
+      return price == null ? null : ([label, money(price)] as const);
     })
     .filter((entry): entry is readonly [string, string] => entry != null)
     .slice(0, 3);
 }
 
-function FacilityCard({
-  row,
-  s,
-  onOpen,
-}: {
-  row: Row;
-  s: Session;
-  onOpen: () => void;
-}) {
+function FacilityCard({ row, s, onOpen }: { row: Row; s: Session; onOpen: () => void }) {
   const data = row.data;
   const price = facilityPrice(data, s);
   const isFree = price === 'Free';
@@ -620,9 +603,7 @@ function FacilityCard({
             <span>
               <small>Time slots</small>
               <strong>
-                {timeSlots.length
-                  ? timeSlots.slice(0, 2).join(' · ')
-                  : 'Not specified'}
+                {timeSlots.length ? timeSlots.slice(0, 2).join(' · ') : 'Not specified'}
               </strong>
             </span>
           </div>
@@ -681,11 +662,7 @@ function FacilityCard({
         )}
 
         <div className="facility-card-actions">
-          <button
-            type="button"
-            className="facility-secondary-action"
-            onClick={onOpen}
-          >
+          <button type="button" className="facility-secondary-action" onClick={onOpen}>
             View details
           </button>
         </div>
@@ -731,9 +708,10 @@ function ScopedModule({
   const [params, setParams] = useSearchParams();
   const source = useRows(s, module, revision);
   // Only explicitly available facilities are exposed to residents, including deep links.
-  const resource = s.role === 'resident' && module === 'facilities'
-    ? { ...source, rows: source.rows.filter((row) => row.data.isAvailable === true) }
-    : source;
+  const resource =
+    s.role === 'resident' && module === 'facilities'
+      ? { ...source, rows: source.rows.filter((row) => row.data.isAvailable === true) }
+      : source;
   const base = pageBase(s);
   const title = routeName === 'requests' ? 'Service Requests' : labels[module];
   const showCards =
@@ -751,32 +729,35 @@ function ScopedModule({
   const facilityRows =
     module === 'facilities'
       ? resource.rows
-        .filter((row) =>
-          [titleOf(row.data), ...Object.values(row.data).filter((value) => typeof value === 'string')]
-            .join(' ')
-            .toLowerCase()
-            .includes(search.toLowerCase()),
-        )
-        .filter(
-          (row) =>
-            facilityCategory === 'all' || facilityCategoryOf(row.data) === facilityCategory,
-        )
-        .sort((a, b) => {
-          const compared = titleOf(a.data).localeCompare(titleOf(b.data));
-          return facilitySort === 'name-desc' ? -compared : compared;
-        })
+          .filter((row) =>
+            [
+              titleOf(row.data),
+              ...Object.values(row.data).filter((value) => typeof value === 'string'),
+            ]
+              .join(' ')
+              .toLowerCase()
+              .includes(search.toLowerCase()),
+          )
+          .filter(
+            (row) =>
+              facilityCategory === 'all' || facilityCategoryOf(row.data) === facilityCategory,
+          )
+          .sort((a, b) => {
+            const compared = titleOf(a.data).localeCompare(titleOf(b.data));
+            return facilitySort === 'name-desc' ? -compared : compared;
+          })
       : [];
 
   const facilityCounts =
     module === 'facilities'
       ? resource.rows.reduce(
-        (counts, row) => {
-          counts.all += 1;
-          counts[facilityCategoryOf(row.data)] += 1;
-          return counts;
-        },
-        { all: 0, indoor: 0, outdoor: 0, recreation: 0 },
-      )
+          (counts, row) => {
+            counts.all += 1;
+            counts[facilityCategoryOf(row.data)] += 1;
+            return counts;
+          },
+          { all: 0, indoor: 0, outdoor: 0, recreation: 0 },
+        )
       : { all: 0, indoor: 0, outdoor: 0, recreation: 0 };
 
   const selected = resource.rows.find((r) => r.id === params.get('record'));
@@ -810,7 +791,9 @@ function ScopedModule({
       <>
         <section className="facilities-hero">
           <div className="facilities-hero-copy">
-            <p className="facilities-breadcrumb">Home <span>›</span> Facilities</p>
+            <p className="facilities-breadcrumb">
+              Home <span>›</span> Facilities
+            </p>
             <h1>Facilities</h1>
             <p>Explore the spaces and amenities available within your community.</p>
           </div>
@@ -923,9 +906,7 @@ function ScopedModule({
             <p className="empty-state">No matches. Try another search or status.</p>
           ) : (
             <div
-              className={
-                'facility-showcase-grid ' + (facilityView === 'list' ? 'list-view' : '')
-              }
+              className={'facility-showcase-grid ' + (facilityView === 'list' ? 'list-view' : '')}
             >
               {visibleFacilities.map((row) => (
                 <FacilityCard
@@ -1013,8 +994,8 @@ function ScopedModule({
               : resource.error
                 ? '—'
                 : resource.rows.filter((r) =>
-                  ['pending', 'expected', 'open'].includes(status(r.data)),
-                ).length}
+                    ['pending', 'expected', 'open'].includes(status(r.data)),
+                  ).length}
           </strong>{' '}
           Awaiting action
         </span>
@@ -1150,10 +1131,10 @@ function ScopedModule({
                         {['billing', 'payments'].includes(module)
                           ? money(amount(row.data))
                           : first(
-                            row.data,
-                            ['flatLabel', 'description', 'purpose', 'role', 'category'],
-                            '—',
-                          )}
+                              row.data,
+                              ['flatLabel', 'description', 'purpose', 'role', 'category'],
+                              '—',
+                            )}
                       </td>
                       <td>
                         <Pill value={status(row.data)} />
@@ -1248,11 +1229,7 @@ function CreateForm({ s, module, onClose }: { s: Session; module: Module; onClos
                 Expected arrival
                 <input type="datetime-local" name="expectedArrival" required />
               </label>
-              <PhoneNumberInput
-                name="phoneNumber"
-                label="Phone number"
-                defaultCountry="PH"
-              />
+              <PhoneNumberInput name="phoneNumber" label="Phone number" defaultCountry="PH" />
               <label>
                 Vehicle number
                 <input name="vehicleNumber" />
@@ -1381,11 +1358,7 @@ function RecordDetails({
 
       setMessage('Payment proof submitted. Waiting for management review.');
     } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : 'Payment proof could not be submitted.',
-      );
+      setMessage(error instanceof Error ? error.message : 'Payment proof could not be submitted.');
     } finally {
       setUploadingProof(false);
     }
@@ -1409,7 +1382,15 @@ function RecordDetails({
     d.departure == null;
   return (
     <Modal title={titleOf(d)} onClose={onClose}>
-      <Pill value={module === 'facilities' ? (d.isAvailable === true ? 'Available' : 'Unavailable') : status(d)} />
+      <Pill
+        value={
+          module === 'facilities'
+            ? d.isAvailable === true
+              ? 'Available'
+              : 'Unavailable'
+            : status(d)
+        }
+      />
       {module === 'facilities' ? (
         <div className="resident-facility-details">
           <FacilityGallery data={d} />
@@ -1551,13 +1532,12 @@ function RecordDetails({
                         : str(latestPayment.status)}
                   </p>
 
-                  {str(latestPayment.status) === 'failed' &&
-                    str(latestPayment.rejectionReason) && (
-                      <p>
-                        <strong>Rejection reason: </strong>
-                        {str(latestPayment.rejectionReason)}
-                      </p>
-                    )}
+                  {str(latestPayment.status) === 'failed' && str(latestPayment.rejectionReason) && (
+                    <p>
+                      <strong>Rejection reason: </strong>
+                      {str(latestPayment.rejectionReason)}
+                    </p>
+                  )}
                 </>
               )}
             </div>
@@ -1589,9 +1569,7 @@ function RecordDetails({
                   <div className="selected-payment-proof">
                     <strong>Selected file</strong>
                     <span>{selectedPaymentProof.name}</span>
-                    <small>
-                      {(selectedPaymentProof.size / 1024 / 1024).toFixed(2)} MB
-                    </small>
+                    <small>{(selectedPaymentProof.size / 1024 / 1024).toFixed(2)} MB</small>
                   </div>
                 )}
 
