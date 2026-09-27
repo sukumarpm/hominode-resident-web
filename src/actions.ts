@@ -3,7 +3,7 @@ import {
   collection,
   doc,
   getDocFromServer,
-  getDocs,
+  getDocsFromServer,
   query,
   serverTimestamp,
   setDoc,
@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import { getBlob, ref, uploadBytes } from 'firebase/storage';
 import { call, firebase } from './firebase';
-import { type Data, type Session, str } from './models';
+import { type Data, type DirectUpiPaymentPreparation, type Session, str } from './models';
 import { assertResident, assertScope, parseCommunity, parseProfile } from './policy';
 export async function currentAuthority(s: Session) {
   const f = firebase();
@@ -45,6 +45,11 @@ export async function currentAuthority(s: Session) {
 function required(v: string, label: string) {
   if (!v.trim()) throw Error(label + ' is required.');
   return v.trim();
+}
+function exactINRAmount(value: unknown): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
+  const formatted = value.toFixed(2);
+  return /^\d+\.\d{2}$/.test(formatted) && Number(formatted) === value ? formatted : null;
 }
 export async function createComplaint(session: Session, values: Record<string, string>) {
   const s = await currentAuthority(session);
@@ -160,7 +165,101 @@ export async function residentLifecycle(
   if (s.role !== 'admin') throw Error('An administrator is required.');
   return call(action, { communityId: s.community.id, userId, ...(reason ? { reason } : {}) });
 }
-export async function submitProof(session: Session, billId: string, file: File) {
+export async function prepareDirectUpiPayment(
+  session: Session,
+  billId: string,
+): Promise<DirectUpiPaymentPreparation> {
+  const s = await currentAuthority(session);
+  if (s.role !== 'resident') throw Error('A resident account is required.');
+  if (!billId.trim() || billId !== billId.trim() || billId.includes('/'))
+    throw Error('This bill is not eligible for UPI payment.');
+
+  const billSnapshot = await getDocFromServer(doc(firebase().db, 'bills', billId));
+  const bill = billSnapshot.data();
+  if (
+    !bill ||
+    bill.communityId !== s.community.id ||
+    bill.flatId !== s.profile.flatId ||
+    (bill.residentId != null && bill.residentId !== s.uid) ||
+    (bill.userId != null && bill.userId !== s.uid) ||
+    !['pending', 'overdue'].includes(str(bill.status)) ||
+    bill.paymentId != null ||
+    bill.paidAt != null ||
+    (bill.paidAmount != null && bill.paidAmount !== 0)
+  )
+    throw Error('This bill is not eligible for UPI payment.');
+
+  const amount = bill.amount;
+  const formattedAmount = exactINRAmount(amount);
+  if (formattedAmount === null)
+    throw Error('This bill amount cannot be represented in INR currency.');
+
+  const existingProofs = await getDocsFromServer(
+    query(
+      collection(firebase().db, 'payments'),
+      where('communityId', '==', s.community.id),
+      where('flatId', '==', s.profile.flatId),
+      where('billId', '==', billId),
+      where('userId', '==', s.uid),
+    ),
+  );
+  if (
+    existingProofs.docs.some((proof) => {
+      const data = proof.data();
+      return (
+        data.communityId === s.community.id &&
+        data.flatId === s.profile.flatId &&
+        data.billId === billId &&
+        data.userId === s.uid &&
+        data.status === 'pending'
+      );
+    })
+  )
+    throw Error('A payment proof for this bill is already awaiting administrator review.');
+
+  const configSnapshot = await getDocFromServer(
+    doc(firebase().db, 'communityPaymentConfigs', s.community.id),
+  );
+  const config = configSnapshot.data();
+  const directUpi = config?.directUpi;
+  if (
+    !config ||
+    config.communityId !== s.community.id ||
+    config.version !== 1 ||
+    typeof directUpi !== 'object' ||
+    directUpi === null ||
+    Array.isArray(directUpi) ||
+    !('enabled' in directUpi) ||
+    directUpi.enabled !== true
+  )
+    throw Error('Direct UPI is not configured for this community.');
+
+  const payeeName = str('payeeName' in directUpi ? directUpi.payeeName : undefined);
+  const vpa = str('vpa' in directUpi ? directUpi.vpa : undefined);
+  if (!payeeName || !vpa || !/^[^\s@]+@[^\s@]+$/.test(vpa))
+    throw Error('Community Direct UPI details are invalid.');
+
+  const params = new URLSearchParams({
+    pa: vpa,
+    pn: payeeName,
+    am: formattedAmount,
+    cu: 'INR',
+  });
+  return {
+    billId,
+    amount,
+    vpa,
+    payeeName,
+    paymentUri: `upi://pay?${params.toString()}`,
+  };
+}
+
+export async function submitProof(
+  session: Session,
+  billId: string,
+  file: File,
+  transactionReference = '',
+) {
   const s = await currentAuthority(session);
   if (s.role !== 'resident') throw Error('A resident account is required.');
   const ext = file.name.split('.').pop()?.toLowerCase() || '';
@@ -178,12 +277,18 @@ export async function submitProof(session: Session, billId: string, file: File) 
     !bill ||
     bill.communityId !== s.community.id ||
     bill.flatId !== s.profile.flatId ||
-    bill.status !== 'pending' ||
-    typeof bill.amount !== 'number' ||
-    bill.amount <= 0
+    !['pending', 'overdue'].includes(str(bill.status)) ||
+    (bill.residentId != null && bill.residentId !== s.uid) ||
+    (bill.userId != null && bill.userId !== s.uid) ||
+    bill.paymentId != null ||
+    bill.paidAt != null ||
+    (bill.paidAmount != null && bill.paidAmount !== 0) ||
+    exactINRAmount(bill.amount) === null
   )
     throw Error('This bill is not eligible for payment proof.');
-  const existing = await getDocs(
+  const reference = transactionReference.trim();
+  if (reference.length > 200) throw Error('Reference number must be 200 characters or fewer.');
+  const existing = await getDocsFromServer(
     query(
       collection(firebase().db, 'payments'),
       where('communityId', '==', s.community.id),
@@ -192,7 +297,18 @@ export async function submitProof(session: Session, billId: string, file: File) 
       where('userId', '==', s.uid),
     ),
   );
-  if (existing.docs.some((d) => d.data().status === 'pending'))
+  if (
+    existing.docs.some((d) => {
+      const data = d.data();
+      return (
+        data.communityId === s.community.id &&
+        data.flatId === s.profile.flatId &&
+        data.billId === billId &&
+        data.userId === s.uid &&
+        data.status === 'pending'
+      );
+    })
+  )
     throw Error('A proof is already pending review.');
   const payment = doc(collection(firebase().db, 'payments'));
   const path = `payment_receipts/${s.community.id}/${billId}/${s.uid}/${payment.id}.${ext}`;
@@ -218,7 +334,7 @@ export async function submitProof(session: Session, billId: string, file: File) 
       verificationMode: 'manual',
       evidenceType: 'receipt',
       status: 'pending',
-      transactionId: null,
+      transactionId: reference || null,
       receiptPath: path,
       paymentDate: Timestamp.now(),
       createdAt: Timestamp.now(),
@@ -243,7 +359,7 @@ export async function latestPaymentForBill(session: Session, billId: string): Pr
     flatId: s.profile.flatId,
   });
 
-  const snapshot = await getDocs(
+  const snapshot = await getDocsFromServer(
     query(
       collection(firebase().db, 'payments'),
       where('communityId', '==', s.community.id),

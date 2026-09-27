@@ -13,10 +13,15 @@ const m = vi.hoisted(() => ({
   } | null,
   profile: {} as Data,
   get: vi.fn(),
+  getMany: vi.fn(),
   add: vi.fn(),
+  set: vi.fn(),
   update: vi.fn(),
   upload: vi.fn(),
   call: vi.fn(),
+  bill: {} as Data,
+  config: {} as Data,
+  proofs: [] as Data[],
 }));
 vi.mock('../firebase', () => ({
   firebase: () => ({ auth: { currentUser: m.user }, db: {}, storage: {} }),
@@ -24,19 +29,34 @@ vi.mock('../firebase', () => ({
 }));
 vi.mock('firebase/firestore', () => ({
   collection: (_db: unknown, name: string) => name,
-  doc: (_db: unknown, col: string, id: string) => col + '/' + id,
+  doc: (...args: unknown[]) => {
+    if (args.length === 1) return { id: 'payment-1', path: 'payments/payment-1' };
+    const col = args[1];
+    return typeof col === 'string' ? col + '/' + (args[2] ?? 'payment-1') : 'payments/payment-1';
+  },
   getDocFromServer: m.get,
+  getDocsFromServer: m.getMany,
   addDoc: m.add,
   updateDoc: m.update,
   serverTimestamp: () => 'SERVER_TIMESTAMP',
   Timestamp: { fromDate: (date: Date) => date, now: () => new Date() },
   getDocs: vi.fn(),
-  query: vi.fn(),
-  where: vi.fn(),
-  setDoc: vi.fn(),
+  query: (_collection: unknown, ...constraints: unknown[]) => constraints,
+  where: (field: string, _op: string, value: unknown) => ({ field, value }),
+  setDoc: m.set,
 }));
-vi.mock('firebase/storage', () => ({ ref: vi.fn(), uploadBytes: m.upload, getBlob: vi.fn() }));
-import { createComplaint, createVisitor, currentAuthority, submitProof } from '../actions';
+vi.mock('firebase/storage', () => ({
+  ref: (_storage: unknown, path: string) => path,
+  uploadBytes: m.upload,
+  getBlob: vi.fn(),
+}));
+import {
+  createComplaint,
+  createVisitor,
+  currentAuthority,
+  prepareDirectUpiPayment,
+  submitProof,
+} from '../actions';
 beforeEach(() => {
   vi.clearAllMocks();
   m.user = {
@@ -45,12 +65,41 @@ beforeEach(() => {
     getIdTokenResult: async () => ({ signInProvider: 'phone' }),
   };
   m.profile = { ...residentData };
+  m.bill = {
+    communityId: 'community-1',
+    flatId: 'unit-1',
+    userId: 'resident-1',
+    amount: 850.5,
+    status: 'pending',
+  };
+  m.config = {
+    communityId: 'community-1',
+    version: 1,
+    directUpi: { enabled: true, payeeName: 'Green Valley', vpa: 'greenvalley@okaxis' },
+  };
+  m.proofs = [];
   m.get.mockImplementation(async (path: string) => ({
     data: () =>
       path.startsWith('communities/')
         ? { name: 'Green Valley', slug: 'green-valley', isActive: true }
-        : m.profile,
+        : path.startsWith('bills/')
+          ? m.bill
+          : path.startsWith('communityPaymentConfigs/')
+            ? m.config
+            : m.profile,
   }));
+  m.getMany.mockImplementation(async (constraints: { field: string; value: unknown }[]) => {
+    const matches = m.proofs.filter((proof) =>
+      constraints.every((constraint) => proof[constraint.field] === constraint.value),
+    );
+    return {
+      docs: matches.map((proof) => ({ data: () => proof })),
+      empty: matches.length === 0,
+      size: matches.length,
+    };
+  });
+  m.upload.mockResolvedValue(undefined);
+  m.set.mockResolvedValue(undefined);
 });
 it('creates complaints with canonical ownership and pending status', async () => {
   await createComplaint(makeSession(), {
@@ -122,4 +171,168 @@ it('rejects invalid receipt files without uploading', async () => {
     submitProof(makeSession(), 'bill-1', new File(['text'], 'receipt.txt', { type: 'text/plain' })),
   ).rejects.toThrow('Choose a JPG');
   expect(m.upload).not.toHaveBeenCalled();
+});
+
+it('prepares a URI from the authoritative bill and enabled community UPI config', async () => {
+  const prepared = await prepareDirectUpiPayment(makeSession(), 'bill-1');
+  const uri = new URL(prepared.paymentUri);
+  expect(prepared.amount).toBe(850.5);
+  expect(prepared.paymentUri).toBe(
+    'upi://pay?pa=greenvalley%40okaxis&pn=Green+Valley&am=850.50&cu=INR',
+  );
+  expect(uri.protocol).toBe('upi:');
+  expect(uri.searchParams.get('pa')).toBe('greenvalley@okaxis');
+  expect(uri.searchParams.get('pn')).toBe('Green Valley');
+  expect(uri.searchParams.get('am')).toBe('850.50');
+  expect(uri.searchParams.get('cu')).toBe('INR');
+});
+
+it.each(['pending', 'overdue'])(
+  'allows direct UPI preparation for %s bills',
+  async (billStatus) => {
+    m.bill = { ...m.bill, status: billStatus };
+    await expect(prepareDirectUpiPayment(makeSession(), 'bill-1')).resolves.toHaveProperty(
+      'billId',
+      'bill-1',
+    );
+  },
+);
+
+it('rejects settled, non-currency and already-pending bills', async () => {
+  m.bill = { ...m.bill, status: 'paid' };
+  await expect(prepareDirectUpiPayment(makeSession(), 'bill-1')).rejects.toThrow('not eligible');
+  m.bill = { ...m.bill, status: 'pending', amount: 10.999 };
+  await expect(prepareDirectUpiPayment(makeSession(), 'bill-1')).rejects.toThrow(
+    'represented in INR',
+  );
+  m.bill = { ...m.bill, amount: 10 };
+  m.proofs = [
+    {
+      communityId: 'community-1',
+      flatId: 'unit-1',
+      billId: 'bill-1',
+      userId: 'resident-1',
+      status: 'pending',
+    },
+  ];
+  await expect(prepareDirectUpiPayment(makeSession(), 'bill-1')).rejects.toThrow(
+    'already awaiting',
+  );
+});
+
+it('rejects missing, disabled or invalid community UPI config', async () => {
+  m.config = {};
+  await expect(prepareDirectUpiPayment(makeSession(), 'bill-1')).rejects.toThrow('not configured');
+  m.config = {
+    communityId: 'community-1',
+    version: 1,
+    directUpi: { enabled: false, payeeName: 'Name', vpa: 'name@bank' },
+  };
+  await expect(prepareDirectUpiPayment(makeSession(), 'bill-1')).rejects.toThrow('not configured');
+  m.config = {
+    communityId: 'community-1',
+    version: 1,
+    directUpi: { enabled: true, payeeName: 'Name', vpa: 'invalid' },
+  };
+  await expect(prepareDirectUpiPayment(makeSession(), 'bill-1')).rejects.toThrow(
+    'details are invalid',
+  );
+});
+
+it('submits legacy-compatible direct UPI proof with trimmed optional reference', async () => {
+  const file = new File(['receipt'], 'receipt.png', { type: 'image/png' });
+  await submitProof(makeSession(), 'bill-1', file, '  txn-123  ');
+  expect(m.upload).toHaveBeenCalledOnce();
+  expect(m.set).toHaveBeenCalledWith(
+    { id: 'payment-1', path: 'payments/payment-1' },
+    expect.objectContaining({
+      amount: 850.5,
+      provider: 'direct_upi',
+      method: 'upi',
+      verificationMode: 'manual',
+      evidenceType: 'receipt',
+      status: 'pending',
+      transactionId: 'txn-123',
+    }),
+  );
+  expect(m.upload).toHaveBeenCalledWith(
+    'payment_receipts/community-1/bill-1/resident-1/payment-1.png',
+    file,
+    expect.objectContaining({
+      contentType: 'image/png',
+      customMetadata: {
+        paymentId: 'payment-1',
+        billId: 'bill-1',
+        communityId: 'community-1',
+        residentUid: 'resident-1',
+      },
+    }),
+  );
+});
+
+it('stores no transaction id for blank references and enforces the reference limit', async () => {
+  const file = new File(['receipt'], 'receipt.jpg', { type: 'image/jpeg' });
+  await submitProof(makeSession(), 'bill-1', file, '   ');
+  expect(m.set).toHaveBeenCalledWith(
+    { id: 'payment-1', path: 'payments/payment-1' },
+    expect.objectContaining({ transactionId: null }),
+  );
+  await submitProof(makeSession(), 'bill-1', file, 'x'.repeat(200));
+  expect(m.set).toHaveBeenLastCalledWith(
+    { id: 'payment-1', path: 'payments/payment-1' },
+    expect.objectContaining({ transactionId: 'x'.repeat(200) }),
+  );
+  await expect(submitProof(makeSession(), 'bill-1', file, 'x'.repeat(201))).rejects.toThrow(
+    '200 characters',
+  );
+});
+
+it('fresh duplicate proof lookup only blocks an exact scoped pending proof', async () => {
+  const file = new File(['receipt'], 'receipt.jpg', { type: 'image/jpeg' });
+  m.proofs = [
+    {
+      communityId: 'community-other',
+      flatId: 'unit-1',
+      billId: 'bill-1',
+      userId: 'resident-1',
+      status: 'pending',
+    },
+    {
+      communityId: 'community-1',
+      flatId: 'unit-other',
+      billId: 'bill-1',
+      userId: 'resident-1',
+      status: 'pending',
+    },
+    {
+      communityId: 'community-1',
+      flatId: 'unit-1',
+      billId: 'bill-other',
+      userId: 'resident-1',
+      status: 'pending',
+    },
+    {
+      communityId: 'community-1',
+      flatId: 'unit-1',
+      billId: 'bill-1',
+      userId: 'resident-other',
+      status: 'pending',
+    },
+    {
+      communityId: 'community-1',
+      flatId: 'unit-1',
+      billId: 'bill-1',
+      userId: 'resident-1',
+      status: 'failed',
+    },
+  ];
+  await expect(submitProof(makeSession(), 'bill-1', file)).resolves.toBeUndefined();
+  m.proofs.push({
+    communityId: 'community-1',
+    flatId: 'unit-1',
+    billId: 'bill-1',
+    userId: 'resident-1',
+    status: 'pending',
+  });
+  await expect(submitProof(makeSession(), 'bill-1', file)).rejects.toThrow('already pending');
 });

@@ -9,7 +9,6 @@ import {
   FileText,
   LayoutGrid,
   List as ListIcon,
-  LoaderCircle,
   MapPin,
   Plus,
   RefreshCw,
@@ -28,10 +27,10 @@ import {
   publishNotice,
   receiptBlob,
   residentLifecycle,
-  submitProof,
   updateScoped,
 } from './actions';
 import { AdminCreateButtons, ResidentReview } from './AdminTools';
+import { ResidentBillPayment } from './components/ResidentBillPayment';
 import { Card, Modal, Pill, State } from './components';
 import { PhoneNumberInput } from './components/PhoneNumberInput';
 import { safeUrl, titleOf, useRows, type Module } from './data';
@@ -1292,9 +1291,7 @@ function RecordDetails({
     [reason, setReason] = useState(''),
     [receipt, setReceipt] = useState(''),
     [latestPayment, setLatestPayment] = useState<Data | null>(null),
-    [paymentLoading, setPaymentLoading] = useState(false),
-    [selectedPaymentProof, setSelectedPaymentProof] = useState<File | null>(null),
-    [uploadingProof, setUploadingProof] = useState(false);
+    [paymentLoading, setPaymentLoading] = useState(false);
   useEffect(
     () => () => {
       if (receipt) URL.revokeObjectURL(receipt);
@@ -1342,27 +1339,6 @@ function RecordDetails({
       active = false;
     };
   }, [module, row.id, s]);
-  async function submitSelectedPaymentProof() {
-    if (!selectedPaymentProof || uploadingProof) return;
-
-    setUploadingProof(true);
-    setMessage('');
-
-    try {
-      await submitProof(s, row.id, selectedPaymentProof);
-
-      setSelectedPaymentProof(null);
-
-      const payment = await latestPaymentForBill(s, row.id);
-      setLatestPayment(payment);
-
-      setMessage('Payment proof submitted. Waiting for management review.');
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Payment proof could not be submitted.');
-    } finally {
-      setUploadingProof(false);
-    }
-  }
   async function perform(action: () => Promise<unknown>) {
     setBusy(true);
     setMessage('');
@@ -1518,86 +1494,15 @@ function RecordDetails({
             </button>
           )}
           {module === 'billing' && s.role === 'resident' && (
-            <div className="payment-proof-status">
-              {paymentLoading && <p>Checking payment proof status…</p>}
-
-              {!paymentLoading && latestPayment && (
-                <>
-                  <p>
-                    <strong>Payment proof: </strong>
-                    {str(latestPayment.status) === 'failed'
-                      ? 'Rejected'
-                      : str(latestPayment.status) === 'pending'
-                        ? 'Pending review'
-                        : str(latestPayment.status)}
-                  </p>
-
-                  {str(latestPayment.status) === 'failed' && str(latestPayment.rejectionReason) && (
-                    <p>
-                      <strong>Rejection reason: </strong>
-                      {str(latestPayment.rejectionReason)}
-                    </p>
-                  )}
-                </>
-              )}
-            </div>
+            <ResidentBillPayment
+              session={s}
+              billId={row.id}
+              bill={d}
+              latestPayment={latestPayment}
+              loading={paymentLoading}
+              onPaymentUpdated={setLatestPayment}
+            />
           )}
-          {module === 'billing' &&
-            s.role === 'resident' &&
-            d.status === 'pending' &&
-            !paymentLoading &&
-            str(latestPayment?.status) !== 'pending' && (
-              <div className="payment-proof-submit">
-                <label>
-                  {str(latestPayment?.status) === 'failed'
-                    ? 'Choose new payment proof'
-                    : 'Choose payment proof'}
-
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/heic,image/heif"
-                    disabled={uploadingProof}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0] ?? null;
-                      setSelectedPaymentProof(file);
-                      setMessage('');
-                    }}
-                  />
-                </label>
-
-                {selectedPaymentProof && (
-                  <div className="selected-payment-proof">
-                    <strong>Selected file</strong>
-                    <span>{selectedPaymentProof.name}</span>
-                    <small>{(selectedPaymentProof.size / 1024 / 1024).toFixed(2)} MB</small>
-                  </div>
-                )}
-
-                {selectedPaymentProof && (
-                  <button
-                    type="button"
-                    className="primary"
-                    disabled={uploadingProof}
-                    onClick={() => void submitSelectedPaymentProof()}
-                  >
-                    {uploadingProof ? (
-                      <>
-                        <LoaderCircle
-                          size={18}
-                          className="payment-upload-spinner"
-                          aria-hidden="true"
-                        />
-                        Uploading payment proof…
-                      </>
-                    ) : str(latestPayment?.status) === 'failed' ? (
-                      'Resubmit payment proof'
-                    ) : (
-                      'Submit payment proof'
-                    )}
-                  </button>
-                )}
-              </div>
-            )}
           {module === 'payments' && str(d.receiptPath) && (
             <button
               onClick={() =>
