@@ -56,6 +56,13 @@ export interface BillDocument {
   amount: number;
   status: string;
 }
+export interface DirectUpiPaymentPreparation {
+  billId: string;
+  amount: number;
+  vpa: string;
+  payeeName: string;
+  paymentUri: string;
+}
 export interface SosDocument {
   communityId: string;
   residentUid: string;

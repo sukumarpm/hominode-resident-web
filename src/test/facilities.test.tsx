@@ -59,10 +59,7 @@ function emit(records: Data[], index = 0) {
   );
 }
 
-function residentSession(
-  residentType?: unknown,
-  ownershipType: unknown = residentType,
-): Session {
+function residentSession(residentType?: unknown, ownershipType: unknown = residentType): Session {
   const session = makeSession();
   const data: Data = { ...session.profile.data };
   delete data.residentType;
@@ -181,9 +178,7 @@ it('renders explicit free and flat pricing modes', () => {
       pricePerDay: 275.5,
     }),
   ]);
-  expect(
-    within(screen.getByRole('dialog')).getByText('₹275.50 / day'),
-  ).toBeInTheDocument();
+  expect(within(screen.getByRole('dialog')).getByText('₹275.50 / day')).toBeInTheDocument();
 });
 
 it('shows only the owner fee for resident-type pricing', () => {
@@ -267,9 +262,7 @@ it('fails closed for an unknown explicit pricing mode', () => {
     }),
   ]);
 
-  expect(
-    within(screen.getByRole('dialog')).getByText('Price unavailable'),
-  ).toBeInTheDocument();
+  expect(within(screen.getByRole('dialog')).getByText('Price unavailable')).toBeInTheDocument();
 });
 
 it.each([undefined, null, {}, '', 'bad', Infinity, NaN, -1, true])(
