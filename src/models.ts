@@ -69,6 +69,27 @@ export interface SosDocument {
   status: 'triggered' | 'acknowledged' | 'responding' | 'resolved' | 'cancelled';
 }
 export const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+export function paymentMethodLabel(value: unknown): string {
+  const method = str(value).toLowerCase();
+  const labels: Record<string, string> = {
+    upi: 'UPI',
+    cash: 'Cash',
+    bank_transfer: 'Bank Transfer',
+    cheque: 'Cheque',
+    manual: 'Manual',
+    external: 'External',
+  };
+  if (labels[method]) return labels[method];
+  return method
+    ? method.replace(/[_-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+    : '—';
+}
+export function paymentAttributionLabel(value: unknown): string {
+  const method = str(value).toLowerCase();
+  if (method === 'upi') return 'Verified by Admin';
+  if (['cash', 'bank_transfer', 'cheque', 'manual'].includes(method)) return 'Recorded by Admin';
+  return '';
+}
 export const strings = (v: unknown): string[] =>
   Array.isArray(v)
     ? [

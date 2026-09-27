@@ -2,7 +2,62 @@ import { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { latestPaymentForBill, prepareDirectUpiPayment, submitProof } from '../actions';
 import { Modal } from '../components';
-import { str, type Data, type Session } from '../models';
+import {
+  dateLabel,
+  paymentAttributionLabel,
+  paymentMethodLabel,
+  str,
+  type Data,
+  type Session,
+} from '../models';
+
+function isBillSettled(bill: Data) {
+  const billStatus = str(bill.status).toLowerCase();
+  return (
+    ['paid', 'completed', 'settled'].includes(billStatus) ||
+    bill.paymentId != null ||
+    bill.paidAt != null ||
+    (typeof bill.paidAmount === 'number' && bill.paidAmount !== 0)
+  );
+}
+
+function PaidBillSummary({ bill }: { bill: Data }) {
+  const method = paymentMethodLabel(bill.paymentMethod);
+  const reference = str(bill.paymentReference) || str(bill.transactionId);
+  const attribution = paymentAttributionLabel(bill.paymentMethod);
+  return (
+    <dl className="detail-fields payment-settlement-summary" aria-label="Payment settlement">
+      <div>
+        <dt>Payment status</dt>
+        <dd>Paid</dd>
+      </div>
+      {method !== '—' && (
+        <div>
+          <dt>Paid via</dt>
+          <dd>{method}</dd>
+        </div>
+      )}
+      {reference && (
+        <div>
+          <dt>Payment reference</dt>
+          <dd>{reference}</dd>
+        </div>
+      )}
+      {bill.paidAt != null && (
+        <div>
+          <dt>Paid on</dt>
+          <dd>{dateLabel(bill.paidAt)}</dd>
+        </div>
+      )}
+      {attribution && (
+        <div>
+          <dt>Settlement</dt>
+          <dd>{attribution}</dd>
+        </div>
+      )}
+    </dl>
+  );
+}
 
 export function ResidentBillPayment({
   session,
@@ -29,12 +84,20 @@ export function ResidentBillPayment({
   const [reference, setReference] = useState('');
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState('');
+  const [cashDetailsOpen, setCashDetailsOpen] = useState(false);
   const billStatus = str(bill.status).toLowerCase();
   const paymentStatus = str(latestPayment?.status).toLowerCase();
   const eligible = ['pending', 'overdue'].includes(billStatus);
-  const settled =
-    ['paid', 'completed', 'settled'].includes(billStatus) || paymentStatus === 'completed';
+  const settled = isBillSettled(bill);
   const pending = paymentStatus === 'pending';
+  const latestPaymentMethod = latestPayment
+    ? str(latestPayment.method).toLowerCase() === 'upi' &&
+      str(latestPayment.provider).toLowerCase() === 'direct_upi'
+      ? 'UPI / Direct UPI'
+      : str(latestPayment.method).toLowerCase() === 'external'
+        ? 'External'
+        : paymentMethodLabel(latestPayment.method ?? latestPayment.paymentMethod)
+    : '';
 
   async function prepare() {
     setPreparing(true);
@@ -78,118 +141,150 @@ export function ResidentBillPayment({
   if (loading)
     return (
       <div className="payment-proof-status">
-        <p>Checking payment proof status…</p>
+        <p>Checking payment status…</p>
       </div>
     );
 
   return (
     <section className="resident-bill-payment" aria-label="Bill payment">
-      <div className="payment-proof-status">
-        {latestPayment && (
-          <>
-            <p>
-              <strong>Payment proof: </strong>
-              {paymentStatus === 'failed'
-                ? 'Rejected'
-                : paymentStatus === 'pending'
-                  ? 'Pending review'
-                  : str(latestPayment.status)}
-            </p>
-            {paymentStatus === 'failed' && str(latestPayment.rejectionReason) && (
+      {settled ? (
+        <PaidBillSummary bill={bill} />
+      ) : (
+        <>
+          {latestPayment && (
+            <div className="payment-proof-status">
               <p>
-                <strong>Rejection reason: </strong>
-                {str(latestPayment.rejectionReason)}
+                <strong>Payment method: </strong>
+                {latestPaymentMethod}
               </p>
-            )}
-            {pending && <p>Your payment proof is awaiting administrator review.</p>}
-          </>
-        )}
-        {settled && <p>This bill is marked as paid. No payment action is available.</p>}
-      </div>
-
-      {eligible && !settled && !pending && (
-        <div className="resident-bill-payment-actions">
-          {!proofOpen && (
-            <>
-              {paymentStatus !== 'failed' && (
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={preparing}
-                  onClick={() => void prepare()}
-                >
-                  {preparing ? 'Preparing UPI payment…' : 'Pay via UPI'}
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  setProofOpen(true);
-                  setMessage('');
-                }}
-              >
+              <p>
+                <strong>Payment proof: </strong>
                 {paymentStatus === 'failed'
-                  ? 'Resubmit payment proof'
-                  : 'Already paid? Submit payment proof'}
-              </button>
-            </>
-          )}
-
-          {proofOpen && (
-            <div className="payment-proof-submit">
-              {paymentStatus === 'failed' && <h3>Submit new payment proof</h3>}
-              <label>
-                Payment receipt image
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/heic,image/heif"
-                  disabled={uploading}
-                  onChange={(event) => {
-                    setFile(event.target.files?.[0] ?? null);
-                    setMessage('');
-                  }}
-                />
-              </label>
-              <label>
-                Transaction / Reference No. <span className="optional-label">(optional)</span>
-                <input
-                  type="text"
-                  value={reference}
-                  maxLength={200}
-                  disabled={uploading}
-                  onChange={(event) => setReference(event.target.value)}
-                  placeholder="Enter the UPI reference number"
-                />
-              </label>
-              {file && (
-                <div className="selected-payment-proof">
-                  <strong>Selected file</strong>
-                  <span>{file.name}</span>
-                  <small>{(file.size / 1024 / 1024).toFixed(2)} MB</small>
-                </div>
+                  ? 'Rejected'
+                  : paymentStatus === 'pending'
+                    ? 'Pending review'
+                    : str(latestPayment.status)}
+              </p>
+              {paymentStatus === 'failed' && str(latestPayment.rejectionReason) && (
+                <p>
+                  <strong>Rejection reason: </strong>
+                  {str(latestPayment.rejectionReason)}
+                </p>
               )}
-              <div className="resident-bill-payment-actions">
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={!file || uploading}
-                  onClick={() => void submit()}
-                >
-                  {uploading
-                    ? 'Uploading payment proof…'
-                    : paymentStatus === 'failed'
-                      ? 'Resubmit payment proof'
-                      : 'Submit payment proof'}
-                </button>
-                {paymentStatus !== 'failed' && (
-                  <button type="button" disabled={uploading} onClick={() => setProofOpen(false)}>
-                    Cancel
-                  </button>
-                )}
-              </div>
+              {pending && <p>Admin verification is pending.</p>}
             </div>
           )}
-        </div>
+
+          {eligible && (
+            <div className="resident-payment-choices">
+              <article className="resident-payment-choice">
+                <h3>Direct UPI</h3>
+                <p>Pay the exact bill amount using the community’s verified UPI details.</p>
+                {!pending && !proofOpen && (
+                  <div className="resident-bill-payment-actions">
+                    {paymentStatus !== 'failed' && (
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={preparing}
+                        onClick={() => void prepare()}
+                      >
+                        {preparing ? 'Preparing UPI payment…' : 'Pay via UPI'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProofOpen(true);
+                        setMessage('');
+                      }}
+                    >
+                      {paymentStatus === 'failed'
+                        ? 'Resubmit payment proof'
+                        : 'Already paid? Submit payment proof'}
+                    </button>
+                  </div>
+                )}
+                {proofOpen && (
+                  <div className="payment-proof-submit">
+                    {paymentStatus === 'failed' && <h4>Submit new UPI payment proof</h4>}
+                    <label>
+                      Payment receipt image
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/heic,image/heif"
+                        disabled={uploading}
+                        onChange={(event) => {
+                          setFile(event.target.files?.[0] ?? null);
+                          setMessage('');
+                        }}
+                      />
+                    </label>
+                    <label>
+                      Transaction / Reference No. <span className="optional-label">(optional)</span>
+                      <input
+                        type="text"
+                        value={reference}
+                        maxLength={200}
+                        disabled={uploading}
+                        onChange={(event) => setReference(event.target.value)}
+                        placeholder="Enter the UPI reference number"
+                      />
+                    </label>
+                    {file && (
+                      <div className="selected-payment-proof">
+                        <strong>Selected file</strong>
+                        <span>{file.name}</span>
+                        <small>{(file.size / 1024 / 1024).toFixed(2)} MB</small>
+                      </div>
+                    )}
+                    <div className="resident-bill-payment-actions">
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={!file || uploading}
+                        onClick={() => void submit()}
+                      >
+                        {uploading
+                          ? 'Uploading payment proof…'
+                          : paymentStatus === 'failed'
+                            ? 'Resubmit payment proof'
+                            : 'Submit payment proof'}
+                      </button>
+                      {paymentStatus !== 'failed' && (
+                        <button
+                          type="button"
+                          disabled={uploading}
+                          onClick={() => setProofOpen(false)}
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </article>
+
+              <article className="resident-payment-choice cash-payment-choice">
+                <h3>Cash</h3>
+                <p>Pay cash directly to your community office.</p>
+                <p>
+                  Your bill will be marked paid only after the Admin receives and records the
+                  payment.
+                </p>
+                <button type="button" onClick={() => setCashDetailsOpen((open) => !open)}>
+                  {cashDetailsOpen ? 'Hide Cash payment details' : 'How Cash payments work'}
+                </button>
+                {cashDetailsOpen && (
+                  <p role="status">
+                    Cash payment is confirmed by your Admin. No receipt upload or online settlement
+                    is needed here.
+                  </p>
+                )}
+              </article>
+            </div>
+          )}
+        </>
       )}
 
       {message && (
@@ -198,7 +293,7 @@ export function ResidentBillPayment({
         </p>
       )}
 
-      {preparation && (
+      {preparation && !settled && (
         <Modal
           title="Pay via UPI"
           onClose={() => {

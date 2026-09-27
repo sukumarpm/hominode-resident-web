@@ -469,6 +469,37 @@ dd {
   margin-top: 16px;
 }
 
+.resident-payment-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 14px;
+}
+
+.resident-payment-choice {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface, white);
+}
+
+.resident-payment-choice h3,
+.resident-payment-choice h4,
+.resident-payment-choice p {
+  margin: 0;
+}
+
+.resident-payment-choice > button {
+  justify-self: start;
+}
+
+.payment-settlement-summary,
+.payment-record-fields {
+  margin-top: 8px;
+}
+
 .resident-bill-payment-actions {
   display: flex;
   flex-wrap: wrap;

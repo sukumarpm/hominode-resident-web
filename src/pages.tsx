@@ -40,6 +40,8 @@ import {
   dateLabel,
   first,
   money,
+  paymentAttributionLabel,
+  paymentMethodLabel,
   status,
   str,
   type Data,
@@ -56,7 +58,7 @@ export const labels: Record<Module, string> = {
   facilities: 'Facilities',
   bookings: 'Bookings',
   billing: 'Bills & Payments',
-  payments: 'Payment Proofs',
+  payments: 'Payments',
   notices: 'Notices',
   events: 'Events',
   documents: 'Documents',
@@ -76,6 +78,7 @@ const descriptions: Partial<Record<Module, string>> = {
   complaints: 'Follow every request from report to resolution.',
   facilities: 'Spaces to connect, unwind and enjoy.',
   billing: 'A clear view of your community payments.',
+  payments: 'Your payments and review status.',
   notices: 'Stay connected to what’s happening around you.',
   buildings: 'Your community, building by building.',
   notifications: 'Updates that matter to you.',
@@ -147,6 +150,65 @@ export function DetailFields({ data }: { data: Data }) {
           </div>
         ) : null;
       })}
+    </dl>
+  );
+}
+export function PaymentRecordFields({ data }: { data: Data }) {
+  const method = paymentMethodLabel(data.method ?? data.paymentMethod);
+  const reference = first(data, ['transactionId', 'paymentReference']);
+  const provider = str(data.provider);
+  const verification = str(data.verificationMode);
+  const evidence = str(data.evidenceType);
+  const attribution =
+    str(data.status).toLowerCase() === 'completed'
+      ? paymentAttributionLabel(data.method ?? data.paymentMethod)
+      : '';
+  return (
+    <dl className="detail-fields payment-record-fields">
+      {method !== '—' && (
+        <div>
+          <dt>Payment method</dt>
+          <dd>{method}</dd>
+        </div>
+      )}
+      {provider && (
+        <div>
+          <dt>Provider</dt>
+          <dd>{provider === 'direct_upi' ? 'Direct UPI' : paymentMethodLabel(provider)}</dd>
+        </div>
+      )}
+      {verification && (
+        <div>
+          <dt>Verification</dt>
+          <dd>{paymentMethodLabel(verification)}</dd>
+        </div>
+      )}
+      {evidence && (
+        <div>
+          <dt>Evidence</dt>
+          <dd>{paymentMethodLabel(evidence)}</dd>
+        </div>
+      )}
+      {reference && (
+        <div>
+          <dt>Payment reference</dt>
+          <dd>{reference}</dd>
+        </div>
+      )}
+      <div>
+        <dt>Status</dt>
+        <dd>{paymentMethodLabel(data.status)}</dd>
+      </div>
+      <div>
+        <dt>Date</dt>
+        <dd>{dateLabel(data.recordedAt ?? data.paidAt ?? data.paymentDate ?? data.createdAt)}</dd>
+      </div>
+      {attribution && (
+        <div>
+          <dt>Settlement</dt>
+          <dd>{attribution}</dd>
+        </div>
+      )}
     </dl>
   );
 }
@@ -961,7 +1023,7 @@ function ScopedModule({
           <AdminCreateButtons s={s} module={module} />
           {module === 'billing' && (
             <Link className="outline-link" to={base + 'payments'}>
-              Payment proofs <ArrowRight size={16} />
+              Payments <ArrowRight size={16} />
             </Link>
           )}
           {module === 'buildings' && (
@@ -1101,15 +1163,18 @@ function ScopedModule({
                 <thead>
                   <tr>
                     <th scope="col">
-                      {module === 'residents'
-                        ? 'Resident'
-                        : module === 'visitors'
-                          ? 'Visitor'
-                          : 'Name / Reference'}
+                      {module === 'payments'
+                        ? 'Payment / Bill reference'
+                        : module === 'residents'
+                          ? 'Resident'
+                          : module === 'visitors'
+                            ? 'Visitor'
+                            : 'Name / Reference'}
                     </th>
                     <th scope="col">
                       {['billing', 'payments'].includes(module) ? 'Amount' : 'Details'}
                     </th>
+                    {module === 'payments' && <th scope="col">Method</th>}
                     <th scope="col">Status</th>
                     <th scope="col">Last updated</th>
                     <th scope="col">
@@ -1121,9 +1186,19 @@ function ScopedModule({
                   {rows.slice(currentPage * 12, currentPage * 12 + 12).map((row) => (
                     <tr key={row.id}>
                       <th scope="row">
-                        <strong>{titleOf(row.data)}</strong>
+                        <strong>
+                          {module === 'payments'
+                            ? first(
+                                row.data,
+                                ['transactionId', 'paymentReference', 'billId'],
+                                row.id,
+                              )
+                            : titleOf(row.data)}
+                        </strong>
                         <small>
-                          {first(row.data, ['phoneNumber', 'email', 'flatLabel'], row.id)}
+                          {module === 'payments'
+                            ? first(row.data, ['billId'], row.id)
+                            : first(row.data, ['phoneNumber', 'email', 'flatLabel'], row.id)}
                         </small>
                       </th>
                       <td>
@@ -1135,6 +1210,9 @@ function ScopedModule({
                               '—',
                             )}
                       </td>
+                      {module === 'payments' && (
+                        <td>{paymentMethodLabel(row.data.method ?? row.data.paymentMethod)}</td>
+                      )}
                       <td>
                         <Pill value={status(row.data)} />
                       </td>
@@ -1357,7 +1435,14 @@ function RecordDetails({
     d.actualArrival == null &&
     d.departure == null;
   return (
-    <Modal title={titleOf(d)} onClose={onClose}>
+    <Modal
+      title={
+        module === 'payments'
+          ? `Payment · ${first(d, ['transactionId', 'paymentReference', 'billId'], row.id)}`
+          : titleOf(d)
+      }
+      onClose={onClose}
+    >
       <Pill
         value={
           module === 'facilities'
@@ -1372,6 +1457,8 @@ function RecordDetails({
           <FacilityGallery data={d} />
           <FacilityFields data={d} s={s} />
         </div>
+      ) : module === 'payments' ? (
+        <PaymentRecordFields data={d} />
       ) : (
         <DetailFields data={d} />
       )}
