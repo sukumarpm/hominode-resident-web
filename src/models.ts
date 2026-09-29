@@ -62,6 +62,10 @@ export interface DirectUpiPaymentPreparation {
   vpa: string;
   payeeName: string;
   paymentUri: string;
+  schemaVersion?: 2;
+  amountMinor?: number;
+  outstandingAmountMinor?: number;
+  currentRevisionId?: string;
 }
 export interface SosDocument {
   communityId: string;
@@ -129,6 +133,37 @@ export function amount(d: Data): number {
     if (Number.isFinite(n)) return n;
   }
   return 0;
+}
+export function isV2Bill(d: Data): boolean {
+  return d.schemaVersion === 2;
+}
+export function isValidV2InrBill(d: Data): boolean {
+  return (
+    isV2Bill(d) &&
+    d.currency === 'INR' &&
+    ['amountMinor', 'paidAmountMinor', 'creditAppliedMinor', 'outstandingAmountMinor'].every(
+      (key) => Number.isSafeInteger(d[key]) && (d[key] as number) >= 0,
+    ) &&
+    typeof d.currentRevisionId === 'string' &&
+    !!d.currentRevisionId.trim()
+  );
+}
+export function formatInrMinorUnits(value: unknown): string {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) return '—';
+  const digits = String(value);
+  const whole = digits.length > 2 ? digits.slice(0, -2) : '0';
+  const paise = digits.slice(-2).padStart(2, '0');
+  const groupedWhole =
+    whole.length > 3
+      ? `${whole.slice(0, -3).replace(/\B(?=(\d{2})+(?!\d))/g, ',')},${whole.slice(-3)}`
+      : whole;
+  return `₹${groupedWhole}.${paise}`;
+}
+export function billingAmountLabel(d: Data): string {
+  if (!isV2Bill(d)) return money(amount(d));
+  if (d.currency !== 'INR' || !Number.isSafeInteger(d.amountMinor) || (d.amountMinor as number) < 0)
+    return 'Unavailable';
+  return formatInrMinorUnits(d.amountMinor);
 }
 export function status(d: Data): string {
   const raw = first(

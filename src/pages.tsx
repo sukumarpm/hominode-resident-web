@@ -37,6 +37,7 @@ import { safeUrl, titleOf, useRows, type Module } from './data';
 import { call } from './firebase';
 import {
   amount,
+  billingAmountLabel,
   dateLabel,
   first,
   money,
@@ -1203,7 +1204,9 @@ function ScopedModule({
                       </th>
                       <td>
                         {['billing', 'payments'].includes(module)
-                          ? money(amount(row.data))
+                          ? module === 'billing'
+                            ? billingAmountLabel(row.data)
+                            : money(amount(row.data))
                           : first(
                               row.data,
                               ['flatLabel', 'description', 'purpose', 'role', 'category'],
@@ -1389,7 +1392,7 @@ function RecordDetails({
 
     setPaymentLoading(true);
 
-    void latestPaymentForBill(s, row.id)
+    void latestPaymentForBill(s, row.id, d)
       .then((payment) => {
         if (active) {
           setLatestPayment(payment);
@@ -1416,7 +1419,7 @@ function RecordDetails({
     return () => {
       active = false;
     };
-  }, [module, row.id, s]);
+  }, [module, row.id, s, d.schemaVersion]);
   async function perform(action: () => Promise<unknown>) {
     setBusy(true);
     setMessage('');

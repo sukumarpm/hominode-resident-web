@@ -11,7 +11,7 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { getBlob, ref, uploadBytes } from 'firebase/storage';
+import { getBlob, getMetadata, ref, uploadBytes } from 'firebase/storage';
 import { call, firebase } from './firebase';
 import { type Data, type DirectUpiPaymentPreparation, type Session, str } from './models';
 import { assertResident, assertScope, parseCommunity, parseProfile } from './policy';
@@ -50,6 +50,276 @@ function exactINRAmount(value: unknown): string | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
   const formatted = value.toFixed(2);
   return /^\d+\.\d{2}$/.test(formatted) && Number(formatted) === value ? formatted : null;
+}
+function isSafeMinor(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+function minorAmountText(value: number): string {
+  const digits = String(value);
+  const whole = digits.length > 2 ? digits.slice(0, -2) : '0';
+  const paise = digits.slice(-2).padStart(2, '0');
+  return `${whole}.${paise}`;
+}
+function timestampMillis(value: unknown): number {
+  if (value && typeof value === 'object') {
+    if ('toMillis' in value && typeof value.toMillis === 'function')
+      return (value.toMillis as () => number)();
+    if ('seconds' in value && typeof value.seconds === 'number') return value.seconds * 1000;
+    if (value instanceof Date) return value.getTime();
+  }
+  return 0;
+}
+async function latestV2ProofForBill(s: Session, billId: string): Promise<Data | null> {
+  const snapshot = await getDocsFromServer(
+    query(
+      collection(firebase().db, 'paymentProofsV2'),
+      where('communityId', '==', s.community!.id),
+      where('residentId', '==', s.uid),
+      where('billId', '==', billId),
+    ),
+  );
+  const proofs: Data[] = snapshot.docs.map((proof) => ({ ...(proof.data() as Data), id: proof.id }));
+  proofs.sort((a, b) => timestampMillis(b.submittedAt) - timestampMillis(a.submittedAt));
+  return proofs[0] ?? null;
+}
+function validateV2Bill(s: Session, bill: Data, billId: string) {
+  if (
+    bill.schemaVersion !== 2 ||
+    bill.communityId !== s.community!.id ||
+    bill.flatId !== s.profile.flatId ||
+    bill.residentId !== s.uid ||
+    (bill.userId != null && bill.userId !== s.uid) ||
+    bill.currency !== 'INR' ||
+    !['pending', 'overdue', 'partially_paid'].includes(str(bill.status)) ||
+    !isSafeMinor(bill.amountMinor) ||
+    bill.amountMinor <= 0 ||
+    !isSafeMinor(bill.paidAmountMinor) ||
+    !isSafeMinor(bill.creditAppliedMinor) ||
+    !isSafeMinor(bill.outstandingAmountMinor) ||
+    bill.outstandingAmountMinor > bill.amountMinor ||
+    typeof bill.currentRevisionId !== 'string' ||
+    !bill.currentRevisionId.trim() ||
+    !billId
+  )
+    throw Error('This V2 bill is unavailable or is not eligible for payment.');
+  return bill;
+}
+function receiptExtension(file: File): string {
+  return file.name.split('.').pop()?.toLowerCase() || '';
+}
+const receiptTypes: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  heic: 'image/heic',
+  heif: 'image/heif',
+};
+function validatePendingV2Proof(s: Session, billId: string, proof: Data) {
+  const paymentId = str(proof.id);
+  const receiptPath = str(proof.receiptPath);
+  const prefix = `payment_receipts/${s.community!.id}/${billId}/${s.uid}/`;
+  const extension = receiptPath.startsWith(prefix)
+    ? receiptPath.slice(prefix.length).split('.').pop() || ''
+    : '';
+  if (
+    proof.schemaVersion !== 2 ||
+    proof.status !== 'pending' ||
+    proof.communityId !== s.community!.id ||
+    proof.residentId !== s.uid ||
+    proof.userId !== s.uid ||
+    proof.billId !== billId ||
+    proof.currency !== 'INR' ||
+    !paymentId ||
+    !isSafeMinor(proof.submittedAmountMinor) ||
+    proof.submittedAmountMinor <= 0 ||
+    typeof proof.submittedBillRevisionId !== 'string' ||
+    !proof.submittedBillRevisionId.trim() ||
+    !receiptTypes[extension] ||
+    receiptPath !== `${prefix}${paymentId}.${extension}`
+  )
+    throw Error('The pending V2 payment proof is unavailable or invalid.');
+  return { paymentId, receiptPath, extension };
+}
+function proofAttemptStorageKey(uid: string, billId: string) {
+  return `hominode-v2-proof-attempt:${uid}:${billId}`;
+}
+function stableV2IdempotencyKey(uid: string, billId: string, afterProofId: string | null) {
+  const storageKey = proofAttemptStorageKey(uid, billId);
+  const stored = localStorage.getItem(storageKey);
+  if (stored) {
+    try {
+      const attempt = JSON.parse(stored) as { key?: unknown; afterProofId?: unknown };
+      if (typeof attempt.key === 'string' && attempt.afterProofId === afterProofId)
+        return attempt.key;
+    } catch {
+      // Replace stale or malformed local attempt state with a fresh key.
+    }
+  }
+  const idempotencyKey = crypto.randomUUID();
+  localStorage.setItem(storageKey, JSON.stringify({ key: idempotencyKey, afterProofId }));
+  return idempotencyKey;
+}
+async function assertExistingReceiptMatches(
+  receiptPath: string,
+  paymentId: string,
+  billId: string,
+  communityId: string,
+  residentUid: string,
+) {
+  const metadata = await getMetadata(ref(firebase().storage, receiptPath));
+  const custom = metadata.customMetadata || {};
+  const requiredMetadata = { paymentId, billId, communityId, residentUid };
+  if (
+    metadata.fullPath !== receiptPath ||
+    !Number.isSafeInteger(metadata.size) ||
+    metadata.size <= 0 ||
+    metadata.size >= 10 * 1024 * 1024 ||
+    !/^image\/(jpeg|jpg|png|heic|heif)$/.test(metadata.contentType || '') ||
+    Object.keys(custom).length !== 4 ||
+    Object.entries(requiredMetadata).some(([key, value]) => custom[key] !== value)
+  )
+    throw Error('The reserved receipt exists but its evidence metadata does not match this proof.');
+}
+async function submitV2Proof(
+  s: Session,
+  billId: string,
+  file: File,
+  transactionReference: string,
+  bill: Data,
+) {
+  validateV2Bill(s, bill, billId);
+  if (bill.outstandingAmountMinor === 0) throw Error('This bill has no outstanding balance.');
+  const reference = transactionReference.trim();
+  if (reference.length > 200) throw Error('Reference number must be 200 characters or fewer.');
+  const latestProof = await latestV2ProofForBill(s, billId);
+  const ext = receiptExtension(file);
+  if (!receiptTypes[ext] || file.size <= 0 || file.size >= 10 * 1024 * 1024)
+    throw Error('Choose a JPG, PNG, HEIC or HEIF image smaller than 10 MB.');
+
+  if (latestProof?.status === 'pending') {
+    const existing = validatePendingV2Proof(s, billId, latestProof);
+    try {
+      await assertExistingReceiptMatches(
+        existing.receiptPath,
+        existing.paymentId,
+        billId,
+        s.community!.id,
+        s.uid,
+      );
+      return latestProof;
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+      if (code !== 'storage/object-not-found') throw error;
+    }
+    const metadata = {
+      paymentId: existing.paymentId,
+      billId,
+      communityId: s.community!.id,
+      residentUid: s.uid,
+    };
+    await uploadBytes(ref(firebase().storage, existing.receiptPath), file, {
+      contentType: receiptTypes[ext],
+      customMetadata: metadata,
+    });
+    return latestProof;
+  }
+
+  const idempotencyKey = stableV2IdempotencyKey(
+    s.uid,
+    billId,
+    latestProof && ['failed', 'completed'].includes(str(latestProof.status))
+      ? str(latestProof.id)
+      : null,
+  );
+  const payload = {
+    billId,
+    submittedAmountMinor: bill.outstandingAmountMinor,
+    submittedBillRevisionId: bill.currentRevisionId,
+    idempotencyKey,
+    receiptExtension: ext,
+    paymentReference: reference || null,
+  };
+  const prepared = await call<{
+    paymentId: string;
+    receiptPath: string;
+    status: string;
+  }>('preparePaymentProofV2', payload);
+  const prefix = `payment_receipts/${s.community!.id}/${billId}/${s.uid}/`;
+  if (
+    !str(prepared.paymentId) ||
+    prepared.status !== 'pending' ||
+    prepared.receiptPath !== `${prefix}${prepared.paymentId}.${ext}`
+  )
+    throw Error('The payment proof could not be prepared safely.');
+  await uploadBytes(ref(firebase().storage, prepared.receiptPath), file, {
+    contentType: receiptTypes[ext],
+    customMetadata: {
+      paymentId: prepared.paymentId,
+      billId,
+      communityId: s.community!.id,
+      residentUid: s.uid,
+    },
+  });
+  localStorage.removeItem(proofAttemptStorageKey(s.uid, billId));
+  return {
+    schemaVersion: 2,
+    id: prepared.paymentId,
+    communityId: s.community!.id,
+    residentId: s.uid,
+    userId: s.uid,
+    billId,
+    status: 'pending',
+    submittedAmountMinor: payload.submittedAmountMinor,
+    submittedBillRevisionId: payload.submittedBillRevisionId,
+    receiptPath: prepared.receiptPath,
+    paymentReference: payload.paymentReference,
+  };
+}
+async function prepareV2DirectUpiPayment(s: Session, billId: string, bill: Data) {
+  validateV2Bill(s, bill, billId);
+  if (bill.outstandingAmountMinor === 0) throw Error('This bill has no outstanding balance.');
+  const latestProof = await latestV2ProofForBill(s, billId);
+  if (latestProof?.status === 'pending')
+    throw Error('A payment proof for this bill is already awaiting administrator review.');
+
+  const configSnapshot = await getDocFromServer(
+    doc(firebase().db, 'communityPaymentConfigs', s.community!.id),
+  );
+  const config = configSnapshot.data();
+  const directUpi = config?.directUpi;
+  if (
+    !config ||
+    config.communityId !== s.community!.id ||
+    config.version !== 1 ||
+    typeof directUpi !== 'object' ||
+    directUpi === null ||
+    Array.isArray(directUpi) ||
+    !('enabled' in directUpi) ||
+    directUpi.enabled !== true
+  )
+    throw Error('Direct UPI is not configured for this community.');
+  const payeeName = str('payeeName' in directUpi ? directUpi.payeeName : undefined);
+  const vpa = str('vpa' in directUpi ? directUpi.vpa : undefined);
+  if (!payeeName || !vpa || !/^[^\s@]+@[^\s@]+$/.test(vpa))
+    throw Error('Community Direct UPI details are invalid.');
+  const amountMinor = bill.outstandingAmountMinor as number;
+  const params = new URLSearchParams({
+    pa: vpa,
+    pn: payeeName,
+    am: minorAmountText(amountMinor),
+    cu: 'INR',
+  });
+  return {
+    billId,
+    amount: amountMinor / 100,
+    amountMinor,
+    outstandingAmountMinor: amountMinor,
+    currentRevisionId: bill.currentRevisionId as string,
+    schemaVersion: 2 as const,
+    vpa,
+    payeeName,
+    paymentUri: `upi://pay?${params.toString()}`,
+  };
 }
 export async function createComplaint(session: Session, values: Record<string, string>) {
   const s = await currentAuthority(session);
@@ -176,6 +446,7 @@ export async function prepareDirectUpiPayment(
 
   const billSnapshot = await getDocFromServer(doc(firebase().db, 'bills', billId));
   const bill = billSnapshot.data();
+  if (bill?.schemaVersion === 2) return prepareV2DirectUpiPayment(s, billId, bill);
   if (
     !bill ||
     bill.communityId !== s.community.id ||
@@ -273,6 +544,7 @@ export async function submitProof(
   if (!types[ext] || file.size <= 0 || file.size >= 10 * 1024 * 1024)
     throw Error('Choose a JPG, PNG, HEIC or HEIF image smaller than 10 MB.');
   const bill = (await getDocFromServer(doc(firebase().db, 'bills', billId))).data();
+  if (bill?.schemaVersion === 2) return submitV2Proof(s, billId, file, transactionReference, bill);
   if (
     !bill ||
     bill.communityId !== s.community.id ||
@@ -348,10 +620,18 @@ export async function submitProof(
     );
   }
 }
-export async function latestPaymentForBill(session: Session, billId: string): Promise<Data | null> {
+export async function latestPaymentForBill(
+  session: Session,
+  billId: string,
+  bill?: Data,
+): Promise<Data | null> {
   console.log('[BillingPaymentStatus] starting', { billId });
 
   const s = await currentAuthority(session);
+
+  const billData =
+    bill ?? (await getDocFromServer(doc(firebase().db, 'bills', billId))).data() ?? {};
+  if (billData.schemaVersion === 2) return latestV2ProofForBill(s, billId);
 
   console.log('[BillingPaymentStatus] authority', {
     uid: s.uid,

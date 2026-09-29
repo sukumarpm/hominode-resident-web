@@ -22,6 +22,7 @@ const m = vi.hoisted(() => ({
   bill: {} as Data,
   config: {} as Data,
   proofs: [] as Data[],
+  metadata: vi.fn(),
 }));
 vi.mock('../firebase', () => ({
   firebase: () => ({ auth: { currentUser: m.user }, db: {}, storage: {} }),
@@ -41,13 +42,15 @@ vi.mock('firebase/firestore', () => ({
   serverTimestamp: () => 'SERVER_TIMESTAMP',
   Timestamp: { fromDate: (date: Date) => date, now: () => new Date() },
   getDocs: vi.fn(),
-  query: (_collection: unknown, ...constraints: unknown[]) => constraints,
+  query: (target: unknown, ...constraints: unknown[]) =>
+    Object.assign(constraints, { collection: target }),
   where: (field: string, _op: string, value: unknown) => ({ field, value }),
   setDoc: m.set,
 }));
 vi.mock('firebase/storage', () => ({
   ref: (_storage: unknown, path: string) => path,
   uploadBytes: m.upload,
+  getMetadata: m.metadata,
   getBlob: vi.fn(),
 }));
 import {
@@ -56,6 +59,7 @@ import {
   currentAuthority,
   prepareDirectUpiPayment,
   submitProof,
+  latestPaymentForBill,
 } from '../actions';
 beforeEach(() => {
   vi.clearAllMocks();
@@ -78,6 +82,7 @@ beforeEach(() => {
     directUpi: { enabled: true, payeeName: 'Green Valley', vpa: 'greenvalley@okaxis' },
   };
   m.proofs = [];
+  localStorage.clear();
   m.get.mockImplementation(async (path: string) => ({
     data: () =>
       path.startsWith('communities/')
@@ -93,12 +98,15 @@ beforeEach(() => {
       constraints.every((constraint) => proof[constraint.field] === constraint.value),
     );
     return {
-      docs: matches.map((proof) => ({ data: () => proof })),
+      docs: matches.map((proof) => ({ id: String(proof.id || 'proof-1'), data: () => proof })),
       empty: matches.length === 0,
       size: matches.length,
     };
   });
   m.upload.mockResolvedValue(undefined);
+  m.metadata.mockRejectedValue(
+    Object.assign(new Error('not found'), { code: 'storage/object-not-found' }),
+  );
   m.set.mockResolvedValue(undefined);
 });
 it('creates complaints with canonical ownership and pending status', async () => {
@@ -335,4 +343,223 @@ it('fresh duplicate proof lookup only blocks an exact scoped pending proof', asy
     status: 'pending',
   });
   await expect(submitProof(makeSession(), 'bill-1', file)).rejects.toThrow('already pending');
+});
+
+function v2Bill(overrides: Data = {}): Data {
+  return {
+    schemaVersion: 2,
+    currency: 'INR',
+    communityId: 'community-1',
+    residentId: 'resident-1',
+    userId: 'resident-1',
+    flatId: 'unit-1',
+    status: 'pending',
+    amountMinor: 250000,
+    paidAmountMinor: 100000,
+    creditAppliedMinor: 30000,
+    outstandingAmountMinor: 120000,
+    currentRevisionId: 'revision-4',
+    billingPeriod: '2026-08',
+    chargeLines: [{ label: 'Maintenance', amountMinor: 250000 }],
+    ...overrides,
+  };
+}
+
+it('prepares V2 Direct UPI for the exact outstanding minor-unit amount', async () => {
+  m.bill = v2Bill({ status: 'partially_paid' });
+  const prepared = await prepareDirectUpiPayment(makeSession(), 'bill-1');
+  expect(prepared.schemaVersion).toBe(2);
+  expect(prepared.amountMinor).toBe(120000);
+  expect(prepared.outstandingAmountMinor).toBe(120000);
+  expect(new URL(prepared.paymentUri).searchParams.get('am')).toBe('1200.00');
+  m.bill = v2Bill({ status: 'partially_paid', outstandingAmountMinor: 123456 });
+  const paisePrepared = await prepareDirectUpiPayment(makeSession(), 'bill-1');
+  expect(new URL(paisePrepared.paymentUri).searchParams.get('am')).toBe('1234.56');
+  expect(m.getMany.mock.calls[0][0].collection).toBe('paymentProofsV2');
+});
+
+it('rejects non-INR and zero-outstanding V2 bills before payment preparation', async () => {
+  m.bill = v2Bill({ currency: 'USD' });
+  await expect(prepareDirectUpiPayment(makeSession(), 'bill-1')).rejects.toThrow('unavailable');
+  m.bill = v2Bill({ status: 'partially_paid', outstandingAmountMinor: 0 });
+  await expect(prepareDirectUpiPayment(makeSession(), 'bill-1')).rejects.toThrow(
+    'no outstanding balance',
+  );
+});
+
+it('looks up V2 proof state in paymentProofsV2, not V1 payments', async () => {
+  const proof = {
+    id: 'proof-v2',
+    schemaVersion: 2,
+    communityId: 'community-1',
+    residentId: 'resident-1',
+    billId: 'bill-1',
+    status: 'pending',
+    submittedAt: new Date('2026-08-01T00:00:00Z'),
+  };
+  m.proofs = [proof];
+  m.bill = v2Bill();
+  await expect(latestPaymentForBill(makeSession(), 'bill-1', m.bill)).resolves.toMatchObject({
+    id: 'proof-v2',
+    status: 'pending',
+  });
+  expect(m.getMany.mock.calls[0][0].collection).toBe('paymentProofsV2');
+});
+
+it('submits a new V2 proof using the callable path and exact receipt metadata only', async () => {
+  m.bill = v2Bill({ status: 'partially_paid' });
+  m.call.mockResolvedValue({
+    paymentId: 'proof-v2-new',
+    receiptPath: 'payment_receipts/community-1/bill-1/resident-1/proof-v2-new.png',
+    status: 'pending',
+  });
+  const file = new File(['receipt'], 'proof.png', { type: 'image/png' });
+  await submitProof(makeSession(), 'bill-1', file, ' REF-22 ');
+  expect(m.call).toHaveBeenCalledWith('preparePaymentProofV2', {
+    billId: 'bill-1',
+    submittedAmountMinor: 120000,
+    submittedBillRevisionId: 'revision-4',
+    idempotencyKey: expect.any(String),
+    receiptExtension: 'png',
+    paymentReference: 'REF-22',
+  });
+  expect(m.upload).toHaveBeenCalledWith(
+    'payment_receipts/community-1/bill-1/resident-1/proof-v2-new.png',
+    file,
+    {
+      contentType: 'image/png',
+      customMetadata: {
+        paymentId: 'proof-v2-new',
+        billId: 'bill-1',
+        communityId: 'community-1',
+        residentUid: 'resident-1',
+      },
+    },
+  );
+  expect(m.set).not.toHaveBeenCalled();
+});
+
+it('resumes a pending V2 proof at its reserved path without another callable', async () => {
+  const file = new File(['receipt'], 'replacement.jpg', { type: 'image/jpeg' });
+  m.bill = v2Bill({ status: 'partially_paid' });
+  m.proofs = [
+    {
+      id: 'reserved-proof',
+      schemaVersion: 2,
+      communityId: 'community-1',
+      residentId: 'resident-1',
+      userId: 'resident-1',
+      billId: 'bill-1',
+      currency: 'INR',
+      status: 'pending',
+      submittedAmountMinor: 98000,
+      submittedBillRevisionId: 'revision-3',
+      receiptPath: 'payment_receipts/community-1/bill-1/resident-1/reserved-proof.png',
+      submittedAt: new Date('2026-08-02T00:00:00Z'),
+    },
+  ];
+  await submitProof(makeSession(), 'bill-1', file);
+  expect(m.call).not.toHaveBeenCalled();
+  expect(m.upload).toHaveBeenCalledWith(
+    'payment_receipts/community-1/bill-1/resident-1/reserved-proof.png',
+    file,
+    expect.objectContaining({
+      contentType: 'image/jpeg',
+      customMetadata: {
+        paymentId: 'reserved-proof',
+        billId: 'bill-1',
+        communityId: 'community-1',
+        residentUid: 'resident-1',
+      },
+    }),
+  );
+});
+
+it('does not overwrite a matching receipt for an existing V2 proof', async () => {
+  const file = new File(['replacement'], 'replacement.png', { type: 'image/png' });
+  m.bill = v2Bill();
+  m.proofs = [
+    {
+      id: 'reserved-proof',
+      schemaVersion: 2,
+      communityId: 'community-1',
+      residentId: 'resident-1',
+      userId: 'resident-1',
+      billId: 'bill-1',
+      currency: 'INR',
+      status: 'pending',
+      submittedAmountMinor: 120000,
+      submittedBillRevisionId: 'revision-4',
+      receiptPath: 'payment_receipts/community-1/bill-1/resident-1/reserved-proof.png',
+    },
+  ];
+  m.metadata.mockResolvedValue({
+    fullPath: 'payment_receipts/community-1/bill-1/resident-1/reserved-proof.png',
+    size: 100,
+    contentType: 'image/png',
+    customMetadata: {
+      paymentId: 'reserved-proof',
+      billId: 'bill-1',
+      communityId: 'community-1',
+      residentUid: 'resident-1',
+    },
+  });
+  await submitProof(makeSession(), 'bill-1', file);
+  expect(m.upload).not.toHaveBeenCalled();
+  expect(m.call).not.toHaveBeenCalled();
+});
+
+it('allows a rejected V2 proof to create a new idempotent attempt', async () => {
+  m.bill = v2Bill();
+  m.proofs = [
+    {
+      id: 'rejected-proof',
+      schemaVersion: 2,
+      communityId: 'community-1',
+      residentId: 'resident-1',
+      billId: 'bill-1',
+      status: 'failed',
+      submittedAt: new Date('2026-08-02T00:00:00Z'),
+    },
+  ];
+  m.call.mockResolvedValue({
+    paymentId: 'proof-v2-retry',
+    receiptPath: 'payment_receipts/community-1/bill-1/resident-1/proof-v2-retry.jpg',
+    status: 'pending',
+  });
+  await submitProof(makeSession(), 'bill-1', new File(['receipt'], 'proof.jpg'));
+  expect(m.call).toHaveBeenCalledWith(
+    'preparePaymentProofV2',
+    expect.objectContaining({
+      submittedAmountMinor: 120000,
+      submittedBillRevisionId: 'revision-4',
+    }),
+  );
+});
+
+it('allows another V2 proof attempt after completion when outstanding remains', async () => {
+  m.bill = v2Bill({ status: 'partially_paid', outstandingAmountMinor: 40000 });
+  m.proofs = [
+    {
+      id: 'completed-proof',
+      schemaVersion: 2,
+      communityId: 'community-1',
+      residentId: 'resident-1',
+      billId: 'bill-1',
+      status: 'completed',
+      submittedAt: new Date('2026-08-02T00:00:00Z'),
+    },
+  ];
+  m.call.mockResolvedValue({
+    paymentId: 'proof-after-completion',
+    receiptPath: 'payment_receipts/community-1/bill-1/resident-1/proof-after-completion.jpg',
+    status: 'pending',
+  });
+  await expect(
+    submitProof(makeSession(), 'bill-1', new File(['receipt'], 'proof.jpg')),
+  ).resolves.toMatchObject({ status: 'pending' });
+  expect(m.call).toHaveBeenCalledWith(
+    'preparePaymentProofV2',
+    expect.objectContaining({ submittedAmountMinor: 40000 }),
+  );
 });

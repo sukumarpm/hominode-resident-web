@@ -4,6 +4,9 @@ import { latestPaymentForBill, prepareDirectUpiPayment, submitProof } from '../a
 import { Modal } from '../components';
 import {
   dateLabel,
+  formatInrMinorUnits,
+  isValidV2InrBill,
+  isV2Bill,
   paymentAttributionLabel,
   paymentMethodLabel,
   str,
@@ -13,11 +16,50 @@ import {
 
 function isBillSettled(bill: Data) {
   const billStatus = str(bill.status).toLowerCase();
+  if (isV2Bill(bill)) return ['paid', 'settled'].includes(billStatus);
   return (
     ['paid', 'completed', 'settled'].includes(billStatus) ||
     bill.paymentId != null ||
     bill.paidAt != null ||
     (typeof bill.paidAmount === 'number' && bill.paidAmount !== 0)
+  );
+}
+
+function V2BillSummary({ bill }: { bill: Data }) {
+  const rows: [string, unknown][] = [
+    ['Total', bill.amountMinor],
+    ['Paid', bill.paidAmountMinor],
+    ['Credit applied', bill.creditAppliedMinor],
+    ['Outstanding', bill.outstandingAmountMinor],
+  ];
+  const lines = Array.isArray(bill.chargeLines) ? bill.chargeLines : [];
+  return (
+    <dl className="detail-fields payment-settlement-summary" aria-label="V2 bill breakdown">
+      {rows.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{formatInrMinorUnits(value)}</dd>
+        </div>
+      ))}
+      {lines.length > 0 && (
+        <div>
+          <dt>Charge details</dt>
+          <dd>
+            <ul>
+              {lines.map((line, index) => {
+                const charge =
+                  line && typeof line === 'object' ? (line as Record<string, unknown>) : {};
+                return (
+                  <li key={typeof charge.lineId === 'string' ? charge.lineId : index}>
+                    {str(charge.label) || 'Charge'}: {formatInrMinorUnits(charge.amountMinor)}
+                  </li>
+                );
+              })}
+            </ul>
+          </dd>
+        </div>
+      )}
+    </dl>
   );
 }
 
@@ -87,8 +129,15 @@ export function ResidentBillPayment({
   const [cashDetailsOpen, setCashDetailsOpen] = useState(false);
   const billStatus = str(bill.status).toLowerCase();
   const paymentStatus = str(latestPayment?.status).toLowerCase();
-  const eligible = ['pending', 'overdue'].includes(billStatus);
-  const settled = isBillSettled(bill);
+  const isV2 = isV2Bill(bill);
+  const validV2 = !isV2 || isValidV2InrBill(bill);
+  const outstanding = isV2 && validV2 ? (bill.outstandingAmountMinor as number) : 0;
+  const eligible = isV2
+    ? validV2 && ['pending', 'overdue', 'partially_paid'].includes(billStatus) && outstanding > 0
+    : ['pending', 'overdue'].includes(billStatus);
+  const settled = isV2
+    ? isBillSettled(bill) || (validV2 && outstanding === 0)
+    : isBillSettled(bill);
   const pending = paymentStatus === 'pending';
   const latestPaymentMethod = latestPayment
     ? str(latestPayment.method).toLowerCase() === 'upi' &&
@@ -129,7 +178,7 @@ export function ResidentBillPayment({
       setFile(null);
       setReference('');
       setProofOpen(false);
-      onPaymentUpdated(await latestPaymentForBill(session, billId));
+      onPaymentUpdated(await latestPaymentForBill(session, billId, bill));
       setMessage('Payment proof submitted. Waiting for management review.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Payment proof could not be submitted.');
@@ -145,10 +194,34 @@ export function ResidentBillPayment({
       </div>
     );
 
+  if (isV2 && !validV2)
+    return (
+      <section className="resident-bill-payment" aria-label="Bill payment">
+        <div className="payment-proof-status" role="status">
+          <p>
+            Billing details unavailable. Payment is disabled until INR bill details can be verified.
+          </p>
+        </div>
+      </section>
+    );
+
   return (
     <section className="resident-bill-payment" aria-label="Bill payment">
+      {isV2 && <V2BillSummary bill={bill} />}
       {settled ? (
-        <PaidBillSummary bill={bill} />
+        isV2 ? (
+          <div className="payment-proof-status" role="status">
+            <p>
+              {outstanding === 0
+                ? 'Bill settled.'
+                : paymentStatus === 'completed'
+                  ? 'Payment proof completed.'
+                  : 'Bill settled.'}
+            </p>
+          </div>
+        ) : (
+          <PaidBillSummary bill={bill} />
+        )
       ) : (
         <>
           {latestPayment && (
@@ -163,7 +236,9 @@ export function ResidentBillPayment({
                   ? 'Rejected'
                   : paymentStatus === 'pending'
                     ? 'Pending review'
-                    : str(latestPayment.status)}
+                    : paymentStatus === 'completed'
+                      ? 'Completed'
+                      : str(latestPayment.status)}
               </p>
               {paymentStatus === 'failed' && str(latestPayment.rejectionReason) && (
                 <p>
@@ -172,6 +247,9 @@ export function ResidentBillPayment({
                 </p>
               )}
               {pending && <p>Admin verification is pending.</p>}
+              {isV2 && paymentStatus === 'completed' && outstanding > 0 && (
+                <p>This payment is complete. The bill still has an outstanding balance.</p>
+              )}
             </div>
           )}
 
@@ -179,7 +257,16 @@ export function ResidentBillPayment({
             <div className="resident-payment-choices">
               <article className="resident-payment-choice">
                 <h3>Direct UPI</h3>
-                <p>Pay the exact bill amount using the community’s verified UPI details.</p>
+                <p>
+                  {isV2
+                    ? 'Pay the exact outstanding amount using the community’s verified UPI details.'
+                    : 'Pay the exact bill amount using the community’s verified UPI details.'}
+                </p>
+                {isV2 && pending && !proofOpen && (
+                  <button type="button" onClick={() => setProofOpen(true)}>
+                    Resume receipt upload
+                  </button>
+                )}
                 {!pending && !proofOpen && (
                   <div className="resident-bill-payment-actions">
                     {paymentStatus !== 'failed' && (
@@ -201,7 +288,9 @@ export function ResidentBillPayment({
                     >
                       {paymentStatus === 'failed'
                         ? 'Resubmit payment proof'
-                        : 'Already paid? Submit payment proof'}
+                        : isV2 && paymentStatus === 'completed'
+                          ? 'Submit proof for remaining balance'
+                          : 'Already paid? Submit payment proof'}
                     </button>
                   </div>
                 )}
@@ -293,6 +382,12 @@ export function ResidentBillPayment({
         </p>
       )}
 
+      {isV2 && validV2 && !eligible && !settled && outstanding === 0 && (
+        <p className="payment-proof-status" role="status">
+          No outstanding balance. No payment is due.
+        </p>
+      )}
+
       {preparation && !settled && (
         <Modal
           title="Pay via UPI"
@@ -316,8 +411,12 @@ export function ResidentBillPayment({
                 <dd>{preparation.vpa}</dd>
               </div>
               <div>
-                <dt>Bill amount</dt>
-                <dd>₹{preparation.amount.toFixed(2)}</dd>
+                <dt>{preparation.schemaVersion === 2 ? 'Outstanding amount' : 'Bill amount'}</dt>
+                <dd>
+                  {preparation.schemaVersion === 2
+                    ? formatInrMinorUnits(preparation.outstandingAmountMinor)
+                    : `₹${preparation.amount.toFixed(2)}`}
+                </dd>
               </div>
             </dl>
             <p className="direct-upi-note">
