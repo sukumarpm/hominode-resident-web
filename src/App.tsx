@@ -10,6 +10,7 @@ import { Boundary } from './components';
 import { Dashboard } from './Dashboard';
 import { ModulePage, ProfilePage, CommunityPage, ReportsPage, UnsupportedPage } from './pages';
 import { SosPage } from './SosPage';
+import { ResidentBillingStatementPage } from './ResidentBillingStatementPage';
 import { type Module } from './data';
 function Guard() {
   const a = useAuth();
@@ -273,6 +274,7 @@ export function App() {
                   element={<ModulePage key={path} module={module} routeName={path} />}
                 />
               ))}
+              <Route path="statement" element={<ResidentBillingStatementPage />} />
               <Route path="resident/*" element={<LegacyResident />} />
               <Route path="apartment" element={<ProfilePage apartment />} />
               <Route path="profile" element={<ProfilePage />} />

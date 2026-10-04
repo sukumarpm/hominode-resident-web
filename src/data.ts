@@ -39,6 +39,7 @@ export interface Spec {
   filters: Filter[];
   document?: string;
   notices?: boolean;
+  residentV2Payments?: { communityId: string; residentId: string };
 }
 export function querySpec(s: Session, m: Module): Spec {
   if (s.role === 'superAdmin') {
@@ -113,9 +114,102 @@ export interface Resource {
   error: string;
 }
 const initial: Resource = { rows: [], loading: true, error: '' };
+const emptyResource: Resource = { rows: [], loading: false, error: '' };
+const maximumPaymentTimestampMs = 8_640_000_000_000_000;
 const stores = new Map<string, { state: Resource; listeners: Set<() => void>; stop: () => void }>();
 const message = (e: unknown) =>
   e instanceof Error ? e.message : 'Unable to load this information. Please try again.';
+
+export function residentV2PaymentRow(
+  id: string,
+  data: Data,
+  communityId: string,
+  residentId: string,
+): Row | null {
+  const receivedAt = data.receivedAt;
+  const createdAt = data.createdAt;
+  const isValidTimestamp = (value: unknown) =>
+    typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= maximumPaymentTimestampMs;
+
+  if (
+    !id ||
+    data.schemaVersion !== 2 ||
+    (data.id !== undefined && data.id !== id) ||
+    (data.transactionId !== undefined && data.transactionId !== id) ||
+    data.communityId !== communityId ||
+    data.residentId !== residentId ||
+    data.currency !== 'INR' ||
+    typeof data.amountMinor !== 'number' ||
+    !Number.isSafeInteger(data.amountMinor) ||
+    data.amountMinor <= 0 ||
+    typeof data.method !== 'string' ||
+    !['upi', 'cash', 'bank_transfer', 'cheque'].includes(data.method) ||
+    (receivedAt !== undefined && !isValidTimestamp(receivedAt)) ||
+    (createdAt !== undefined && !isValidTimestamp(createdAt)) ||
+    !isValidTimestamp(receivedAt !== undefined ? receivedAt : createdAt)
+  )
+    return null;
+
+  const reference = data.reference;
+  if (
+    reference !== undefined &&
+    reference !== null &&
+    (typeof reference !== 'string' ||
+      !reference ||
+      reference !== reference.trim() ||
+      reference.length > 200)
+  )
+    return null;
+
+  const recordedAt = new Date((receivedAt !== undefined ? receivedAt : createdAt) as number);
+  const normalized: Data = {
+    transactionId: id,
+    schemaVersion: 2,
+    currency: 'INR',
+    amountMinor: data.amountMinor,
+    method: data.method,
+    status: 'completed',
+    recordedAt,
+  };
+  if (typeof reference === 'string') normalized.paymentReference = reference;
+  return { id, data: normalized, source: 'residentBillingV2Payment' };
+}
+
+export function mergeResidentPaymentRows(legacyRows: Row[], v2Rows: Row[]): Row[] {
+  const usedIds = new Set(legacyRows.map((row) => row.id));
+  const mergedV2 = v2Rows.map((row) => {
+    const baseId = `billing-v2-transaction:${row.id}`;
+    let id = baseId;
+    let suffix = 0;
+    while (usedIds.has(id)) id = `${baseId}:${++suffix}`;
+    usedIds.add(id);
+    return { ...row, id };
+  });
+  return [...legacyRows, ...mergedV2].sort((a, b) => {
+    const aTimestamp = dateOf(
+      a.source === 'residentBillingV2Payment'
+        ? a.data.recordedAt
+        : (a.data.createdAt ?? a.data.triggeredAt),
+    )?.getTime();
+    const bTimestamp = dateOf(
+      b.source === 'residentBillingV2Payment'
+        ? b.data.recordedAt
+        : (b.data.createdAt ?? b.data.triggeredAt),
+    )?.getTime();
+    return (bTimestamp || 0) - (aTimestamp || 0);
+  });
+}
+
+export function combineResidentPaymentResources(legacy: Resource, v2: Resource): Resource {
+  const error = legacy.error || v2.error;
+  if (error) return { rows: [], loading: false, error };
+  if (legacy.loading || v2.loading) return { rows: [], loading: true, error: '' };
+  return { rows: mergeResidentPaymentRows(legacy.rows, v2.rows), loading: false, error: '' };
+}
+
 function subscribe(key: string, spec: Spec, notify: () => void) {
   let store = stores.get(key);
   if (!store) {
@@ -135,13 +229,31 @@ function subscribe(key: string, spec: Spec, notify: () => void) {
     };
     const accept = (rows: Row[]) => {
       if (failed) return;
+      if (spec.residentV2Payments) {
+        const validated = rows.map((row) =>
+          residentV2PaymentRow(
+            row.id,
+            row.data,
+            spec.residentV2Payments!.communityId,
+            spec.residentV2Payments!.residentId,
+          ),
+        );
+        if (validated.some((row) => row === null)) {
+          error(Error('Billing V2 payment history could not be validated.'));
+          return;
+        }
+        emit({ rows: validated as Row[], loading: false, error: '' });
+        return;
+      }
+
       const safe = rows.filter((row) =>
-        spec.filters.every(([field, op, value]) =>
-          op === '=='
-            ? row.data[field] === value
-            : Array.isArray(row.data[field]) && (row.data[field] as unknown[]).includes(value),
-        ),
-      );
+            spec.filters.every(([field, op, value]) =>
+              op === '=='
+                ? row.data[field] === value
+                : Array.isArray(row.data[field]) &&
+                  (row.data[field] as unknown[]).includes(value),
+            ),
+          );
       safe.sort(
         (a, b) =>
           (dateOf(b.data.createdAt ?? b.data.triggeredAt)?.getTime() || 0) -
@@ -242,6 +354,50 @@ export function useRows(session: Session, module: Module, revision = 0): Resourc
     () => (config.error ? { rows: [], loading: false, error: config.error } : initial),
     [config.error],
   );
+  const listen = useCallback(
+    (notify: () => void) => (config.spec ? subscribe(key, config.spec, notify) : () => {}),
+    [key, config.spec],
+  );
+  const snapshot = useCallback(() => stores.get(key)?.state || fallback, [key, fallback]);
+  return useSyncExternalStore(listen, snapshot, snapshot);
+}
+
+export function useResidentV2Payments(
+  session: Session,
+  enabled = true,
+  revision = 0,
+): Resource {
+  const config = useMemo(() => {
+    if (!enabled || session.role !== 'resident') return { spec: null, error: '' };
+    try {
+      const communityId = assertScope(session);
+      if (!session.uid.trim()) throw Error('Resident identity could not be verified.');
+      return {
+        spec: {
+          collection: 'paymentTransactions',
+          filters: [
+            ['communityId', '==', communityId],
+            ['residentId', '==', session.uid],
+          ] as Filter[],
+          residentV2Payments: { communityId, residentId: session.uid },
+        },
+        error: '',
+      };
+    } catch (e) {
+      return { spec: null, error: message(e) };
+    }
+  }, [enabled, session]);
+  const key = JSON.stringify([
+    'resident-v2-payments',
+    session.uid,
+    session.community?.id || '',
+    config.spec,
+    revision,
+  ]);
+  const fallback = useMemo<Resource>(() => {
+    if (config.error) return { rows: [], loading: false, error: config.error };
+    return config.spec ? initial : emptyResource;
+  }, [config.error, config.spec]);
   const listen = useCallback(
     (notify: () => void) => (config.spec ? subscribe(key, config.spec, notify) : () => {}),
     [key, config.spec],

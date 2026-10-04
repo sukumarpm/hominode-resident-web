@@ -33,13 +33,21 @@ import { AdminCreateButtons, ResidentReview } from './AdminTools';
 import { ResidentBillPayment } from './components/ResidentBillPayment';
 import { Card, Modal, Pill, State } from './components';
 import { PhoneNumberInput } from './components/PhoneNumberInput';
-import { safeUrl, titleOf, useRows, type Module } from './data';
+import {
+  combineResidentPaymentResources,
+  safeUrl,
+  titleOf,
+  useResidentV2Payments,
+  useRows,
+  type Module,
+} from './data';
 import { call } from './firebase';
 import {
   amount,
   billingAmountLabel,
   dateLabel,
   first,
+  formatInrMinorUnits,
   money,
   paymentAttributionLabel,
   paymentMethodLabel,
@@ -154,9 +162,17 @@ export function DetailFields({ data }: { data: Data }) {
     </dl>
   );
 }
-export function PaymentRecordFields({ data }: { data: Data }) {
+export function PaymentRecordFields({
+  data,
+  canonicalV2 = false,
+}: {
+  data: Data;
+  canonicalV2?: boolean;
+}) {
   const method = paymentMethodLabel(data.method ?? data.paymentMethod);
   const reference = first(data, ['transactionId', 'paymentReference']);
+  const canonicalTransactionId = str(data.transactionId);
+  const canonicalReference = str(data.paymentReference);
   const provider = str(data.provider);
   const verification = str(data.verificationMode);
   const evidence = str(data.evidenceType);
@@ -190,11 +206,28 @@ export function PaymentRecordFields({ data }: { data: Data }) {
           <dd>{paymentMethodLabel(evidence)}</dd>
         </div>
       )}
-      {reference && (
-        <div>
-          <dt>Payment reference</dt>
-          <dd>{reference}</dd>
-        </div>
+      {canonicalV2 ? (
+        <>
+          {canonicalTransactionId && (
+            <div>
+              <dt>Transaction ID</dt>
+              <dd>{canonicalTransactionId}</dd>
+            </div>
+          )}
+          {canonicalReference && (
+            <div>
+              <dt>Payment reference</dt>
+              <dd>{canonicalReference}</dd>
+            </div>
+          )}
+        </>
+      ) : (
+        reference && (
+          <div>
+            <dt>Payment reference</dt>
+            <dd>{reference}</dd>
+          </div>
+        )
       )}
       <div>
         <dt>Status</dt>
@@ -769,11 +802,18 @@ function ScopedModule({
   const [facilityView, setFacilityView] = useState<FacilityView>('grid');
   const [params, setParams] = useSearchParams();
   const source = useRows(s, module, revision);
+  const v2PaymentSource = useResidentV2Payments(
+    s,
+    s.role === 'resident' && module === 'payments',
+    revision,
+  );
   // Only explicitly available facilities are exposed to residents, including deep links.
   const resource =
     s.role === 'resident' && module === 'facilities'
       ? { ...source, rows: source.rows.filter((row) => row.data.isAvailable === true) }
-      : source;
+      : s.role === 'resident' && module === 'payments'
+        ? combineResidentPaymentResources(source, v2PaymentSource)
+        : source;
   const base = pageBase(s);
   const title = routeName === 'requests' ? 'Service Requests' : labels[module];
   const showCards =
@@ -1023,9 +1063,16 @@ function ScopedModule({
         <div className="page-actions">
           <AdminCreateButtons s={s} module={module} />
           {module === 'billing' && (
-            <Link className="outline-link" to={base + 'payments'}>
-              Payments <ArrowRight size={16} />
-            </Link>
+            <>
+              <Link className="outline-link" to={base + 'payments'}>
+                Payments <ArrowRight size={16} />
+              </Link>
+              {s.role === 'resident' && (
+                <Link className="outline-link" to={base + 'statement'}>
+                  Monthly Statement <ArrowRight size={16} />
+                </Link>
+              )}
+            </>
           )}
           {module === 'buildings' && (
             <Link className="outline-link" to={base + 'units'}>
@@ -1129,24 +1176,34 @@ function ScopedModule({
                       </span>
                       <Pill value={status(row.data)} />
                     </div>
-                    <h3>{titleOf(row.data)}</h3>
+                    <h3>
+                      {row.source === 'residentBillingV2Payment'
+                        ? first(row.data, ['transactionId'], 'Payment')
+                        : titleOf(row.data)}
+                    </h3>
                     <p>
-                      {first(
-                        row.data,
-                        [
-                          'description',
-                          'content',
-                          'purpose',
-                          'flatLabel',
-                          'location',
-                          'body',
-                          'lastMessage',
-                        ],
-                        'View details',
-                      )}
+                      {row.source === 'residentBillingV2Payment'
+                        ? `${formatInrMinorUnits(row.data.amountMinor)} · ${paymentMethodLabel(row.data.method)}`
+                        : first(
+                            row.data,
+                            [
+                              'description',
+                              'content',
+                              'purpose',
+                              'flatLabel',
+                              'location',
+                              'body',
+                              'lastMessage',
+                            ],
+                            'View details',
+                          )}
                     </p>
                     <small>
-                      {dateLabel(row.data.expectedArrival ?? row.data.date ?? row.data.createdAt)}
+                      {dateLabel(
+                        row.source === 'residentBillingV2Payment'
+                          ? row.data.recordedAt
+                          : (row.data.expectedArrival ?? row.data.date ?? row.data.createdAt),
+                      )}
                     </small>
                     <span className="card-more">
                       View details <ArrowRight size={16} />
@@ -1198,7 +1255,9 @@ function ScopedModule({
                         </strong>
                         <small>
                           {module === 'payments'
-                            ? first(row.data, ['billId'], row.id)
+                            ? row.source === 'residentBillingV2Payment'
+                              ? first(row.data, ['billId'])
+                              : first(row.data, ['billId'], row.id)
                             : first(row.data, ['phoneNumber', 'email', 'flatLabel'], row.id)}
                         </small>
                       </th>
@@ -1439,11 +1498,8 @@ function RecordDetails({
     d.departure == null;
   return (
     <Modal
-      title={
-        module === 'payments'
-          ? `Payment · ${first(d, ['transactionId', 'paymentReference', 'billId'], row.id)}`
-          : titleOf(d)
-      }
+      title={module === 'payments' ? 'Payment details' : titleOf(d)}
+      className={module === 'payments' ? 'payment-details-dialog' : undefined}
       onClose={onClose}
     >
       <Pill
@@ -1461,7 +1517,10 @@ function RecordDetails({
           <FacilityFields data={d} s={s} />
         </div>
       ) : module === 'payments' ? (
-        <PaymentRecordFields data={d} />
+        <PaymentRecordFields
+          data={d}
+          canonicalV2={row.source === 'residentBillingV2Payment'}
+        />
       ) : (
         <DetailFields data={d} />
       )}

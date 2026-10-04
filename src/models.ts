@@ -30,6 +30,7 @@ export interface Session {
 export interface Row {
   id: string;
   data: Data;
+  source?: 'residentBillingV2Payment';
 }
 export interface VisitorDocument {
   communityId: string;

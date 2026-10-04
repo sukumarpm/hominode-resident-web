@@ -3930,3 +3930,651 @@ dialog::backdrop {
     right: 8px;
   }
 }
+
+dialog.payment-details-dialog {
+  width: min(820px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: 88dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+}
+
+dialog.payment-details-dialog .dialog-heading {
+  position: sticky;
+  top: -26px;
+  z-index: 1;
+  margin: -26px -26px 20px;
+  padding: 18px 26px 12px;
+  background: #fff;
+}
+
+dialog.payment-details-dialog .dialog-heading h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+dialog.payment-details-dialog .dialog-heading .icon-button {
+  flex: 0 0 auto;
+}
+
+dialog.payment-details-dialog .detail-fields,
+dialog.payment-details-dialog .detail-fields > div {
+  min-width: 0;
+}
+
+dialog.payment-details-dialog .detail-fields dd {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 560px) {
+  dialog.payment-details-dialog {
+    width: calc(100vw - 24px);
+    max-width: calc(100vw - 24px);
+  }
+
+  dialog.payment-details-dialog .dialog-heading {
+    top: -20px;
+    margin: -20px -20px 16px;
+    padding: 16px 20px 10px;
+  }
+}
+
+.resident-statement-page {
+  min-width: 0;
+  max-width: 100%;
+  color: #152646;
+}
+
+.resident-statement-header {
+  margin-bottom: 18px;
+}
+
+.resident-statement-header h1 {
+  margin: 3px 0 6px;
+  color: #14274b;
+  font-size: clamp(29px, 3vw, 37px);
+  letter-spacing: -1px;
+}
+
+.resident-statement-header > div > p:last-child {
+  margin: 0;
+  color: #63758e;
+  font-size: 13px;
+}
+
+.resident-statement-period {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 20px;
+  padding: 12px 15px;
+  border: 1px solid #e3ebf6;
+  border-radius: 15px;
+  background: #fff;
+  box-shadow: 0 4px 18px #304e8408;
+}
+
+.resident-statement-period button {
+  min-height: 38px;
+  width: fit-content;
+  padding: 8px 13px;
+  border: 1px solid #dbe6f4;
+  border-radius: 10px;
+  background: #f8fbff;
+  color: #2c4a70;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.resident-statement-period button:last-child {
+  justify-self: end;
+}
+
+.resident-statement-period button:hover:not(:disabled) {
+  border-color: #a9c4e8;
+  background: #f1f7ff;
+}
+
+.resident-statement-period button:focus-visible,
+.resident-statement-retry:focus-visible {
+  outline: 3px solid #8db7f2;
+  outline-offset: 2px;
+}
+
+.resident-statement-period h2 {
+  margin: 0;
+  color: #172d50;
+  font-size: 17px;
+  font-weight: 750;
+  text-align: center;
+}
+
+.resident-statement-summary {
+  min-width: 0;
+}
+
+.resident-statement-section-title {
+  margin: 0 0 13px;
+  color: #253b5b;
+  font-size: 16px;
+}
+
+.resident-statement-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 13px;
+}
+
+.resident-statement-kpi {
+  min-width: 0;
+  min-height: 117px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 17px 18px;
+  border: 1px solid #e2eaf5;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 5px 18px #304e8409;
+}
+
+.resident-statement-kpi > span {
+  color: #5f718b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.resident-statement-kpi strong {
+  color: #14274b;
+  font-size: clamp(20px, 2vw, 27px);
+  font-weight: 800;
+  letter-spacing: -0.55px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.resident-statement-kpi small {
+  color: #8090a5;
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.resident-statement-kpi:nth-child(2) {
+  border-top: 3px solid #39a680;
+}
+
+.resident-statement-kpi:nth-child(3) {
+  border-top: 3px solid #d9a449;
+}
+
+.resident-statement-kpi:nth-child(4) {
+  border-top: 3px solid #8772ce;
+}
+
+.resident-statement-secondary {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.65fr) minmax(0, 1.35fr);
+  gap: 13px;
+  margin-top: 13px;
+}
+
+.resident-statement-credit-applied,
+.resident-statement-status {
+  min-width: 0;
+  padding: 17px 19px;
+  border: 1px solid #e2eaf5;
+  border-radius: 15px;
+  background: #fff;
+}
+
+.resident-statement-credit-applied {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  background: #f9fbff;
+}
+
+.resident-statement-credit-applied span {
+  color: #60728b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.resident-statement-credit-applied strong {
+  color: #263e62;
+  font-size: 20px;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.resident-statement-status header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.resident-statement-status h3 {
+  margin: 0;
+  color: #253b5b;
+  font-size: 13px;
+}
+
+.resident-statement-status header > span {
+  color: #8290a4;
+  font-size: 10px;
+}
+
+.resident-statement-status dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.resident-statement-status dl > div {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.resident-statement-status dt {
+  color: #72839a;
+  font-size: 10px;
+}
+
+.resident-statement-status dd {
+  margin: 0;
+  color: #223958;
+  font-size: 17px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.resident-statement-bills {
+  display: grid;
+  gap: 16px;
+  margin-top: 22px;
+}
+
+.resident-statement-bill {
+  min-width: 0;
+  padding: 21px 23px;
+  border: 1px solid #e1eaf5;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 5px 22px #304e8409;
+}
+
+.resident-statement-bill-header {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(130px, auto);
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 17px;
+  border-bottom: 1px solid #e8eef6;
+}
+
+.resident-statement-bill-header > div:first-child > span,
+.resident-statement-due-date > span {
+  display: block;
+  margin-bottom: 4px;
+  color: #8391a5;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.55px;
+  text-transform: uppercase;
+}
+
+.resident-statement-bill-header h2 {
+  margin: 0;
+  color: #182e50;
+  font-size: 20px;
+  letter-spacing: -0.35px;
+}
+
+.resident-statement-badge {
+  width: fit-content;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.resident-statement-badge.status-paid {
+  border-color: #ccebdd;
+  background: #effaf5;
+  color: #267653;
+}
+
+.resident-statement-badge.status-pending {
+  border-color: #d8e5f6;
+  background: #f3f7fd;
+  color: #536d92;
+}
+
+.resident-statement-badge.status-partially_paid {
+  border-color: #f1dfb9;
+  background: #fff9ed;
+  color: #926b20;
+}
+
+.resident-statement-badge.status-overdue {
+  border-color: #f0d4d8;
+  background: #fff5f6;
+  color: #a34753;
+}
+
+.resident-statement-due-date {
+  justify-self: end;
+  text-align: right;
+}
+
+.resident-statement-due-date strong {
+  color: #314966;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.resident-statement-bill-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 17px 0 18px;
+  padding: 0;
+}
+
+.resident-statement-bill-summary > div {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding: 12px 13px;
+  border-radius: 11px;
+  background: #f7faff;
+}
+
+.resident-statement-bill-summary dt {
+  color: #74849a;
+  font-size: 10px;
+}
+
+.resident-statement-bill-summary dd {
+  margin: 0;
+  color: #233a5b;
+  font-size: 14px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.resident-statement-charge-lines,
+.resident-statement-settlements {
+  min-width: 0;
+  margin-top: 19px;
+}
+
+.resident-statement-charge-lines h3,
+.resident-statement-settlements h3 {
+  margin: 0 0 9px;
+  color: #2e4565;
+  font-size: 13px;
+}
+
+.resident-statement-charge-lines dl,
+.resident-statement-settlements > div {
+  margin: 0;
+  border-top: 1px solid #e8eef6;
+}
+
+.resident-statement-charge-lines dl > div,
+.resident-statement-settlement > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #e8eef6;
+}
+
+.resident-statement-charge-lines dt,
+.resident-statement-settlement dt {
+  min-width: 0;
+  color: #667991;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.resident-statement-charge-lines dd,
+.resident-statement-settlement dd {
+  min-width: 0;
+  margin: 0;
+  color: #263d5e;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.resident-statement-settlements > div {
+  padding-inline: 14px;
+  border: 1px solid #e5edf7;
+  border-radius: 12px;
+  background: #fbfdff;
+}
+
+.resident-statement-settlement {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  margin: 0;
+}
+
+.resident-statement-settlement-empty {
+  margin: 0;
+  padding: 13px 15px;
+  border: 1px dashed #d9e4f1;
+  border-radius: 11px;
+  background: #fafcff;
+  color: #73849b;
+  font-size: 11px;
+}
+
+.resident-statement-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  margin-top: 17px;
+  padding: 27px 18px;
+  border: 1px dashed #d5e1ef;
+  border-radius: 16px;
+  background: #f9fbff;
+  text-align: center;
+}
+
+.resident-statement-empty h2 {
+  margin: 0;
+  color: #263d5e;
+  font-size: 15px;
+}
+
+.resident-statement-empty p {
+  margin: 0;
+  color: #7788a0;
+  font-size: 11px;
+}
+
+.resident-statement-state,
+.resident-statement-error {
+  min-height: 112px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 22px;
+  border: 1px solid #e2eaf5;
+  border-radius: 16px;
+  background: #fff;
+  color: #60728b;
+}
+
+.resident-statement-spinner {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 2px solid #d9e6f6;
+  border-top-color: #3778d0;
+  border-radius: 50%;
+  animation: resident-statement-spin 0.85s linear infinite;
+}
+
+@keyframes resident-statement-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.resident-statement-error {
+  align-items: flex-start;
+  flex-direction: column;
+  justify-content: center;
+  border-color: #f0dadd;
+  background: #fffafb;
+}
+
+.resident-statement-error h2,
+.resident-statement-error p {
+  margin: 0;
+}
+
+.resident-statement-error h2 {
+  color: #8f3945;
+  font-size: 16px;
+}
+
+.resident-statement-error p {
+  color: #7a5960;
+  font-size: 12px;
+}
+
+.resident-statement-retry {
+  min-height: 37px;
+  padding: 8px 14px;
+  border: 1px solid #cad9ec;
+  border-radius: 9px;
+  background: #fff;
+  color: #2c4f7b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+@media (max-width: 1050px) {
+  .resident-statement-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .resident-statement-bill-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .resident-statement-secondary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .resident-statement-status dl {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .resident-statement-bill-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .resident-statement-due-date {
+    grid-column: 1 / -1;
+    justify-self: start;
+    text-align: left;
+  }
+}
+
+@media (max-width: 560px) {
+  .resident-statement-period {
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr);
+    gap: 6px;
+    padding: 10px;
+  }
+
+  .resident-statement-period button {
+    min-width: 0;
+    padding: 8px 9px;
+    font-size: 10px;
+  }
+
+  .resident-statement-period h2 {
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
+  .resident-statement-kpis {
+    gap: 9px;
+  }
+
+  .resident-statement-kpi {
+    min-height: 102px;
+    padding: 14px;
+  }
+
+  .resident-statement-kpi strong {
+    font-size: clamp(18px, 5vw, 23px);
+  }
+
+  .resident-statement-status dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 12px;
+  }
+
+  .resident-statement-bill {
+    padding: 16px;
+  }
+
+  .resident-statement-bill-header {
+    gap: 10px;
+  }
+
+  .resident-statement-bill-header h2 {
+    font-size: 17px;
+  }
+
+  .resident-statement-bill-summary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
+  }
+
+  .resident-statement-bill-summary > div {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 10px;
+    padding: 10px 11px;
+  }
+
+  .resident-statement-bill-summary dd {
+    text-align: right;
+  }
+}
+
+@media (max-width: 350px) {
+  .resident-statement-kpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
