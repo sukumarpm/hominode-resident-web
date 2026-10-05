@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   getApps: vi.fn((): object[] => []),
@@ -114,4 +115,31 @@ it('keeps debug App Check available only in DEV with explicit local config', asy
   const { firebase } = await import('../firebase');
   firebase();
   expect(mocks.initializeAppCheck).toHaveBeenCalledOnce();
+});
+
+it('initializes the provisioned Resident Web identity from the public env example', async () => {
+  const example = Object.fromEntries(
+    readFileSync('.env.example', 'utf8')
+      .split('\n')
+      .filter((line) => line.startsWith('VITE_'))
+      .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]),
+  );
+  expect(example).toEqual({
+    VITE_FIREBASE_API_KEY: 'AIzaSyD50Xmkm1pNNhtBaXTd6yKPEeUEeEn1PjE',
+    VITE_FIREBASE_APP_ID: '1:551984029668:web:1a46284d081d68170db1f1',
+    VITE_RECAPTCHA_ENTERPRISE_SITE_KEY: '6LdEQ-AtAAAAADGPkxeBHorVh-uPVECx5K7s3JzI',
+  });
+  for (const [key, value] of Object.entries(example)) vi.stubEnv(key, value);
+  const { firebase } = await import('../firebase');
+  firebase();
+  expect(mocks.initializeApp).toHaveBeenCalledWith({
+    apiKey: example.VITE_FIREBASE_API_KEY,
+    appId: example.VITE_FIREBASE_APP_ID,
+    projectId: 'hominode-prod',
+    authDomain: 'hominode-prod.firebaseapp.com',
+    storageBucket: 'hominode-prod.firebasestorage.app',
+    messagingSenderId: '551984029668',
+  });
+  expect(mocks.provider).toHaveBeenCalledWith(example.VITE_RECAPTCHA_ENTERPRISE_SITE_KEY);
+  expect(debugGlobal.FIREBASE_APPCHECK_DEBUG_TOKEN).toBeUndefined();
 });
