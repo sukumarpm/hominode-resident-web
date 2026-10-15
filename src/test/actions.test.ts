@@ -173,6 +173,14 @@ it('rejects invalid receipt files without uploading', async () => {
   expect(m.upload).not.toHaveBeenCalled();
 });
 
+it('does not route Billing V2 balances through legacy UPI or receipt submissions', async () => {
+  m.bill = { ...m.bill, amountMinor: 85050, paidAmountMinor: 20000, outstandingAmountMinor: 65050 };
+  await expect(prepareDirectUpiPayment(makeSession(), 'bill-1')).rejects.toThrow('not eligible');
+  await expect(submitProof(makeSession(), 'bill-1', new File(['receipt'], 'receipt.png', { type: 'image/png' }))).rejects.toThrow('not eligible');
+  expect(m.upload).not.toHaveBeenCalled();
+  expect(m.set).not.toHaveBeenCalled();
+});
+
 it('prepares a URI from the authoritative bill and enabled community UPI config', async () => {
   const prepared = await prepareDirectUpiPayment(makeSession(), 'bill-1');
   const uri = new URL(prepared.paymentUri);
