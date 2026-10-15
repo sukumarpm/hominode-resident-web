@@ -21,7 +21,21 @@ vi.mock('firebase/firestore', () => ({
     return listener.stop;
   }),
 }));
-import { useRows } from '../data';
+import { querySpec, useRows } from '../data';
+
+it('queries community events from the shared events_announcements collection', () => {
+  for (const session of [makeSession('admin'), makeSession()]) {
+    expect(querySpec(session, 'events')).toEqual({
+      collection: 'events_announcements',
+      filters: [
+        ['communityId', '==', session.community!.id],
+        ['type', '==', 'event'],
+      ],
+    });
+  }
+  expect(querySpec(makeSession(), 'notices').collection).toBe('notices');
+});
+
 it('shares listeners, filters mismatched records and cleans up on unmount', () => {
   const s = makeSession();
   const first = renderHook(() => useRows(s, 'visitors'));
