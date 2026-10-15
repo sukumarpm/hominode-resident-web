@@ -69,6 +69,24 @@ it('routes a rejected proof directly to resubmission without opening the QR flow
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 });
 
+it('routes Billing V2 bills to the Resident app without showing legacy payment controls', () => {
+  render(
+    <ResidentBillPayment
+      session={makeSession()}
+      billId="bill-v2"
+      bill={{ status: 'pending', amount: 850.5, amountMinor: 85050, paidAmountMinor: 20000, outstandingAmountMinor: 65050 }}
+      latestPayment={null}
+      loading={false}
+      onPaymentUpdated={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole('status')).toHaveTextContent('newer billing system');
+  expect(screen.queryByRole('button', { name: 'Pay via UPI' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Submit payment proof/i })).not.toBeInTheDocument();
+  expect(paymentActions.prepare).not.toHaveBeenCalled();
+  expect(paymentActions.submit).not.toHaveBeenCalled();
+});
+
 it('shows Direct UPI and informational Cash choices for an eligible bill', () => {
   render(
     <ResidentBillPayment
