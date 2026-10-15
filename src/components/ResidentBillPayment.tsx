@@ -11,6 +11,12 @@ import {
   type Session,
 } from '../models';
 
+// Billing V2 balances must not be submitted through legacy proof verification.
+function isBillingV2Bill(bill: Data) {
+  return typeof bill.amountMinor === 'number' &&
+    typeof bill.outstandingAmountMinor === 'number';
+}
+
 function isBillSettled(bill: Data) {
   const billStatus = str(bill.status).toLowerCase();
   return (
@@ -137,6 +143,16 @@ export function ResidentBillPayment({
       setUploading(false);
     }
   }
+
+  if (isBillingV2Bill(bill))
+    return (
+      <section className="resident-bill-payment" aria-label="Bill payment">
+        <p role="status">
+          This bill uses the newer billing system. Please use the Hominode Resident app to
+          review its remaining balance and submit payment evidence.
+        </p>
+      </section>
+    );
 
   if (loading)
     return (
