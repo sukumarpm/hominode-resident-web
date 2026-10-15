@@ -46,6 +46,12 @@ function required(v: string, label: string) {
   if (!v.trim()) throw Error(label + ' is required.');
   return v.trim();
 }
+// Billing V2 uses minor-unit balances and a separate settlement/proof ledger.
+// Never route these bills through the legacy full-amount payment flow.
+function isBillingV2Bill(bill: Data): boolean {
+  return typeof bill.amountMinor === 'number' &&
+    typeof bill.outstandingAmountMinor === 'number';
+}
 function exactINRAmount(value: unknown): string | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
   const formatted = value.toFixed(2);
@@ -178,6 +184,7 @@ export async function prepareDirectUpiPayment(
   const bill = billSnapshot.data();
   if (
     !bill ||
+    isBillingV2Bill(bill) ||
     bill.communityId !== s.community.id ||
     bill.flatId !== s.profile.flatId ||
     (bill.residentId != null && bill.residentId !== s.uid) ||
@@ -275,6 +282,7 @@ export async function submitProof(
   const bill = (await getDocFromServer(doc(firebase().db, 'bills', billId))).data();
   if (
     !bill ||
+    isBillingV2Bill(bill) ||
     bill.communityId !== s.community.id ||
     bill.flatId !== s.profile.flatId ||
     !['pending', 'overdue'].includes(str(bill.status)) ||
