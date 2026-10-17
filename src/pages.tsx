@@ -17,20 +17,22 @@ import {
   Users,
   Waves,
 } from 'lucide-react';
-import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   createComplaint,
   createVisitor,
   currentAuthority,
   latestPaymentForBill,
   publishNotice,
+  residentNotificationDestination,
   receiptBlob,
   residentLifecycle,
   updateScoped,
 } from './actions';
 import { AdminCreateButtons, ResidentReview } from './AdminTools';
 import { ResidentBillPayment } from './components/ResidentBillPayment';
+import { VisitorQrPass } from './components/VisitorQrPass';
 import { Card, Modal, Pill, State } from './components';
 import { PhoneNumberInput } from './components/PhoneNumberInput';
 import {
@@ -800,6 +802,10 @@ function ScopedModule({
   const [facilityCategory, setFacilityCategory] = useState<FacilityCategory>('all');
   const [facilitySort, setFacilitySort] = useState<FacilitySort>('name-asc');
   const [facilityView, setFacilityView] = useState<FacilityView>('grid');
+  const [openingNotification, setOpeningNotification] = useState('');
+  const [notificationRouteError, setNotificationRouteError] = useState('');
+  const notificationNavigationInFlight = useRef(false);
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const source = useRows(s, module, revision);
   const v2PaymentSource = useResidentV2Payments(
@@ -873,6 +879,29 @@ function ScopedModule({
       p.delete('create');
       return p;
     });
+  }
+  async function openRecord(row: Row) {
+    if (module === 'notifications' && s.role === 'resident') {
+      if (notificationNavigationInFlight.current) return;
+      notificationNavigationInFlight.current = true;
+      setOpeningNotification(row.id);
+      setNotificationRouteError('');
+      try {
+        const destination = await residentNotificationDestination(s, row.id);
+        if (destination === 'billing') {
+          navigate(base + 'statement');
+        } else {
+          setParams({ record: row.id });
+        }
+      } catch {
+        setNotificationRouteError('This notification is no longer available in your community.');
+      } finally {
+        notificationNavigationInFlight.current = false;
+        setOpeningNotification('');
+      }
+      return;
+    }
+    setParams({ record: row.id });
   }
   if (module === 'facilities') {
     const facilityPageCount = Math.max(1, Math.ceil(facilityRows.length / 12));
@@ -1153,6 +1182,7 @@ function ScopedModule({
           </button>
         </div>
         <State resource={resource} empty={'No ' + title.toLowerCase() + ' to display yet.'}>
+          {notificationRouteError && <p role="alert">{notificationRouteError}</p>}
           {!rows.length ? (
             <p className="empty-state">No matches. Try another search or status.</p>
           ) : showCards ? (
@@ -1161,7 +1191,9 @@ function ScopedModule({
                 <button
                   className="module-card"
                   key={row.id}
-                  onClick={() => setParams({ record: row.id })}
+                  onClick={() => void openRecord(row)}
+                  disabled={module === 'notifications' && openingNotification !== ''}
+                  aria-busy={openingNotification === row.id}
                 >
                   <div className="module-card-body">
                     <div className="card-heading">
@@ -1523,6 +1555,9 @@ function RecordDetails({
         />
       ) : (
         <DetailFields data={d} />
+      )}
+      {module === 'visitors' && s.role === 'resident' && (
+        <VisitorQrPass visitorId={row.id} data={d} />
       )}
       {module === 'complaints' && (
         <ol className="timeline">
