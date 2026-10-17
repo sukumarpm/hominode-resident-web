@@ -8,7 +8,8 @@ import {
   validSlug,
 } from '../policy';
 import { adminData, residentData, community, makeSession, secondCommunity } from './fixtures';
-import { querySpec } from '../data';
+import { mergeAnnouncementRows, querySpec } from '../data';
+import { canResidentUseEvents } from '../eventsEntitlement';
 describe('canonical access policy', () => {
   it('accepts verified resident and active assigned admin', () => {
     expect(() => assertResident(makeSession().profile, community, 'green-valley')).not.toThrow();
@@ -140,8 +141,22 @@ describe('query boundaries', () => {
       'resident-1',
     ]);
   });
-  it('uses callable discovery for resident notices', () =>
-    expect(querySpec(makeSession(), 'notices').notices).toBe(true));
+  it('uses scoped announcement feed for resident notices', () =>
+    expect(querySpec(makeSession(), 'notices').announcementFeed).toBe('resident'));
+  it('deduplicates exact legacy/canonical announcement overlap without collapsing distinct dates', () => {
+    const rows = mergeAnnouncementRows([
+      { id: 'legacy', data: { title: 'Water Notice', content: 'Work at 9', createdAt: new Date(10) } },
+      { id: 'canonical', data: { title: ' water   notice ', description: 'Work at 9', publishedAt: new Date(10) } },
+      { id: 'separate', data: { title: 'Water Notice', content: 'Work at 9', createdAt: new Date(86_400_011) } },
+    ]);
+    expect(rows.map((row) => row.id)).toEqual(['separate', 'legacy']);
+  });
+  it('allows Events only with the active community Events entitlement', () => {
+    const base = { communityId: 'community-1', resolvedRole: 'resident', status: 'active', features: { events: true } };
+    expect(canResidentUseEvents({...base, features: {events: false}}, 'community-1', 10)).toBe(false);
+    expect(canResidentUseEvents(base, 'other-community', 10)).toBe(false);
+    expect(canResidentUseEvents(base, 'community-1', 10)).toBe(true);
+  });
   it('restricts inbox to canonical recipient role and app', () =>
     expect(querySpec(makeSession(), 'notifications').filters).toEqual(
       expect.arrayContaining([

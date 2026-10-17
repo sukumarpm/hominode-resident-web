@@ -82,27 +82,89 @@ it('does not republish stale notices after a notice listener loses permission', 
   await act(async () => {
     await Promise.resolve();
   });
-  const first = m.listeners[start],
-    second = m.listeners[start + 1];
-  act(() => {
-    first.next({
-      exists: () => true,
-      data: () => ({ communityId: 'community-1', title: 'First notice' }),
-    });
-    second.next({
-      exists: () => true,
-      data: () => ({ communityId: 'community-1', title: 'Second notice' }),
-    });
+  const listeners = m.listeners.slice(start);
+  expect(listeners).toHaveLength(4);
+  const notice = (id: string, title: string) => ({
+    id,
+    exists: () => true,
+    data: () => ({ communityId: 'community-1', title, content: `${title} content` }),
   });
-  expect(result.current.rows).toHaveLength(2);
-  act(() => first.error(Error('Notice access revoked')));
-  act(() =>
-    second.next({
-      exists: () => true,
-      data: () => ({ communityId: 'community-1', title: 'Changed notice' }),
+  act(() => {
+    listeners[0].next({ docs: [] });
+    listeners[1].next({ docs: [] });
+    listeners[2].next(notice('notice-1', 'First notice'));
+    listeners[3].next(notice('notice-2', 'Second notice'));
+  });
+  expect(result.current.rows.map((row) => row.id).sort()).toEqual(['notice-1', 'notice-2']);
+  const denied = Object.assign(Error('Notice access revoked'), { code: 'permission-denied' });
+  act(() => listeners[2].error(denied));
+  expect(result.current).toEqual({ rows: [], loading: false, error: 'Notice access revoked' });
+  act(() => {
+    // Simulate already queued callbacks even after the listeners are stopped.
+    listeners[0].next({
+      docs: [
+        {
+          id: 'announcement-1',
+          data: () => ({
+            communityId: 'community-1',
+            status: 'published',
+            title: 'Late announcement',
+            content: 'Must remain hidden',
+          }),
+        },
+      ],
+    });
+    listeners[3].next(notice('notice-2', 'Changed notice'));
+  });
+  expect(result.current).toEqual({ rows: [], loading: false, error: 'Notice access revoked' });
+  listeners.forEach((listener) => expect(listener.stop).toHaveBeenCalledOnce());
+  unmount();
+  listeners.forEach((listener) => expect(listener.stop).toHaveBeenCalledOnce());
+});
+
+it('does not start notice listeners when verification finishes after permission loss', async () => {
+  const { call } = await import('../firebase');
+  let resolveAccess!: (value: unknown) => void;
+  vi.mocked(call).mockReturnValue(
+    new Promise((resolve) => {
+      resolveAccess = resolve;
     }),
   );
-  expect(result.current.rows).toHaveLength(0);
-  expect(result.current.error).toBe('Notice access revoked');
+  const start = m.listeners.length;
+  const session = makeSession();
+  const { result, unmount } = renderHook(() => useRows(session, 'notices'));
+  const listeners = m.listeners.slice(start);
+  expect(listeners).toHaveLength(2);
+  act(() =>
+    listeners[0].error(Object.assign(Error('Access denied'), { code: 'permission-denied' })),
+  );
+  await act(async () => {
+    resolveAccess({ communityId: 'community-1', flatId: 'unit-1', noticeIds: ['notice-1'] });
+  });
+  expect(m.listeners).toHaveLength(start + 2);
+  expect(result.current).toEqual({ rows: [], loading: false, error: 'Access denied' });
   unmount();
+  listeners.forEach((listener) => expect(listener.stop).toHaveBeenCalledOnce());
+});
+
+it.each([
+  { communityId: 'community-2', flatId: 'unit-1' },
+  { communityId: 'community-1', flatId: 'other-unit' },
+])('rejects notice access for a mismatched scope: %j', async (scope) => {
+  const { call } = await import('../firebase');
+  vi.mocked(call).mockResolvedValue({ ...scope, noticeIds: ['notice-1'] });
+  const start = m.listeners.length;
+  const session = makeSession();
+  const { result, unmount } = renderHook(() => useRows(session, 'notices'));
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(result.current).toEqual({
+    rows: [],
+    loading: false,
+    error: 'Community announcements could not be verified.',
+  });
+  expect(m.listeners).toHaveLength(start + 2);
+  unmount();
+  m.listeners.slice(start).forEach((listener) => expect(listener.stop).toHaveBeenCalledOnce());
 });

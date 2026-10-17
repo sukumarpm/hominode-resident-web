@@ -5,6 +5,8 @@ import { useAuth } from './session';
 import { adminNav, residentNav, platformNav, type Navigation } from './navigation';
 import { useRows } from './data';
 import { type Session } from './models';
+import { call } from './firebase';
+import { canResidentUseEvents } from './eventsEntitlement';
 function InboxLink({ session, href }: { session: Session; href: string }) {
   const inbox = useRows(session, 'notifications');
   const unread = inbox.rows.filter((r) => r.data.isRead !== true).length;
@@ -37,11 +39,27 @@ function AuthenticatedShell({
 }) {
   const resident = s.role === 'resident';
   const base = resident ? '/' + s.community!.slug + '/' : '/';
-  const nav = resident ? residentNav : s.role === 'superAdmin' ? platformNav : adminNav;
+  const communityId = s.community?.id;
   const [open, setOpen] = useState(false),
     [collapsed, setCollapsed] = useState(false),
     [search, setSearch] = useState(''),
     [logoutError, setLogoutError] = useState('');
+  const [residentEventsAllowed, setResidentEventsAllowed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    setResidentEventsAllowed(false);
+    if (!resident) return () => { active = false; };
+      void call<import('./eventsEntitlement').EventsEntitlement>('getCurrentCommunityEntitlement')
+      .then((value) => {
+        if (active && communityId) setResidentEventsAllowed(canResidentUseEvents(value, communityId));
+      })
+      .catch(() => { if (active) setResidentEventsAllowed(false); });
+    return () => { active = false; };
+  }, [resident, s.uid, communityId]);
+  const rawNav = resident ? residentNav : s.role === 'superAdmin' ? platformNav : adminNav;
+  const nav = resident
+    ? rawNav.filter((item) => item.path !== 'events' || residentEventsAllowed)
+    : rawNav;
   const location = useLocation(),
     navigate = useNavigate();
   const drawer = useRef<HTMLDialogElement>(null);

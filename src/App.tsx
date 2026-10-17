@@ -12,6 +12,7 @@ import { ModulePage, ProfilePage, CommunityPage, ReportsPage, UnsupportedPage } 
 import { SosPage } from './SosPage';
 import { ResidentBillingStatementPage } from './ResidentBillingStatementPage';
 import { type Module } from './data';
+import { canResidentUseEvents } from './eventsEntitlement';
 function Guard() {
   const a = useAuth();
   if (a.loading) return <Boundary title="Welcome to Hominode" message="Verifying your session…" />;
@@ -96,6 +97,26 @@ function TenantGate() {
     );
   }
   return <Outlet />;
+}
+function ResidentEventsGuard() {
+  const { session } = useAuth();
+  const sessionCommunityId = session?.community?.id;
+  const [allowed, setAllowed] = useState<boolean | null>(null);
+  useEffect(() => {
+    let active = true;
+    setAllowed(null);
+    if (!session || session.role !== 'resident' || !sessionCommunityId) {
+      setAllowed(false);
+      return () => { active = false; };
+    }
+    void call<import('./eventsEntitlement').EventsEntitlement>('getCurrentCommunityEntitlement')
+      .then((entitlement) => { if (active) setAllowed(canResidentUseEvents(entitlement, sessionCommunityId)); })
+      .catch(() => { if (active) setAllowed(false); });
+    return () => { active = false; };
+  }, [session, sessionCommunityId]);
+  if (allowed === null)
+    return <Boundary title="Events" message="Checking your community plan…" />;
+  return allowed ? <Outlet /> : <Boundary title="Events unavailable" message="Events are not included in this community plan." />;
 }
 function PlatformGuard() {
   const { session } = useAuth();
@@ -267,13 +288,16 @@ export function App() {
           <Route path=":tenant" element={<TenantGate />}>
             <Route element={<Shell />}>
               <Route index element={<Dashboard />} />
-              {Object.entries(residentModules).map(([path, module]) => (
+              {Object.entries(residentModules).filter(([path]) => path !== 'events').map(([path, module]) => (
                 <Route
                   key={path}
                   path={path}
                   element={<ModulePage key={path} module={module} routeName={path} />}
                 />
               ))}
+              <Route element={<ResidentEventsGuard />}>
+                <Route path="events" element={<ModulePage module="events" routeName="events" />} />
+              </Route>
               <Route path="statement" element={<ResidentBillingStatementPage />} />
               <Route path="resident/*" element={<LegacyResident />} />
               <Route path="apartment" element={<ProfilePage apartment />} />
