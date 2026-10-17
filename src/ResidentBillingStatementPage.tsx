@@ -9,17 +9,25 @@ import {
   type ResidentStatementSettlement,
 } from './residentBillingStatement';
 import { formatInrMinorUnits, type Session } from './models';
+import {
+  getResidentBillingV2Receipt,
+  RESIDENT_BILLING_V2_RECEIPT_ERROR,
+  type ResidentBillingV2Receipt,
+} from './residentBillingV2Receipt';
 
 type StatementLoader = (
   session: Session,
   billingPeriod: string,
 ) => Promise<ResidentBillingStatement>;
+type ReceiptLoader = (session: Session, transactionId: string) => Promise<ResidentBillingV2Receipt>;
 
 export function ResidentBillingStatementPage({
   loadStatement = getResidentBillingV2Statement,
+  loadReceipt = getResidentBillingV2Receipt,
   now = () => new Date(),
 }: {
   loadStatement?: StatementLoader;
+  loadReceipt?: ReceiptLoader;
   now?: () => Date;
 }) {
   const { session } = useAuth();
@@ -28,8 +36,45 @@ export function ResidentBillingStatementPage({
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0);
+  const [receiptTransactionId, setReceiptTransactionId] = useState<string | null>(null);
+  const [receipt, setReceipt] = useState<ResidentBillingV2Receipt | null>(null);
+  const [receiptLoading, setReceiptLoading] = useState(false);
+  const [receiptFailed, setReceiptFailed] = useState(false);
   const requestId = useRef(0);
+  const receiptRequestId = useRef(0);
   const billingPeriod = monthKey(selectedMonth);
+
+  useEffect(() => {
+    receiptRequestId.current += 1;
+    setReceiptTransactionId(null);
+    setReceipt(null);
+    setReceiptLoading(false);
+    setReceiptFailed(false);
+    return () => {
+      receiptRequestId.current += 1;
+    };
+  }, [session]);
+
+  async function openReceipt(transactionId: string) {
+    if (!session || receiptLoading) return;
+    const generation = ++receiptRequestId.current;
+    setReceiptTransactionId(transactionId);
+    setReceipt(null);
+    setReceiptFailed(false);
+    setReceiptLoading(true);
+    try {
+      const value = await loadReceipt(session, transactionId);
+      if (generation === receiptRequestId.current) setReceipt(value);
+    } catch {
+      if (generation === receiptRequestId.current) setReceiptFailed(true);
+    } finally {
+      if (generation === receiptRequestId.current) setReceiptLoading(false);
+    }
+  }
+
+  function retryReceipt() {
+    if (receiptTransactionId) void openReceipt(receiptTransactionId);
+  }
 
   useEffect(() => {
     const generation = ++requestId.current;
@@ -64,6 +109,11 @@ export function ResidentBillingStatementPage({
   }, [session, billingPeriod, retry, loadStatement]);
 
   function changeMonth(offset: number) {
+    receiptRequestId.current += 1;
+    setReceiptTransactionId(null);
+    setReceipt(null);
+    setReceiptLoading(false);
+    setReceiptFailed(false);
     setStatement(null);
     setFailed(false);
     setLoading(true);
@@ -130,9 +180,23 @@ export function ResidentBillingStatementPage({
           ) : (
             <div className="resident-statement-bills">
               {statement.bills.map((bill) => (
-                <StatementBill key={bill.billId} bill={bill} />
+                <StatementBill
+                  key={bill.billId}
+                  bill={bill}
+                  onViewReceipt={openReceipt}
+                  receiptLoading={receiptLoading}
+                  loadingTransactionId={receiptTransactionId}
+                />
               ))}
             </div>
+          )}
+          {receiptTransactionId && (
+            <ResidentV2ReceiptPanel
+              receipt={receipt}
+              loading={receiptLoading}
+              failed={receiptFailed}
+              onRetry={retryReceipt}
+            />
           )}
         </>
       ) : null}
@@ -178,15 +242,7 @@ function StatementSummary({ summary }: { summary: ResidentBillingStatementSummar
   );
 }
 
-function StatementKpi({
-  label,
-  value,
-  note,
-}: {
-  label: string;
-  value: number;
-  note?: string;
-}) {
+function StatementKpi({ label, value, note }: { label: string; value: number; note?: string }) {
   return (
     <article className="resident-statement-kpi">
       <span>{label}</span>
@@ -196,7 +252,17 @@ function StatementKpi({
   );
 }
 
-function StatementBill({ bill }: { bill: ResidentBillingStatementBill }) {
+function StatementBill({
+  bill,
+  onViewReceipt,
+  receiptLoading,
+  loadingTransactionId,
+}: {
+  bill: ResidentBillingStatementBill;
+  onViewReceipt: (transactionId: string) => void;
+  receiptLoading: boolean;
+  loadingTransactionId: string | null;
+}) {
   return (
     <article className="resident-statement-bill">
       <header className="resident-statement-bill-header">
@@ -231,11 +297,19 @@ function StatementBill({ bill }: { bill: ResidentBillingStatementBill }) {
       <section className="resident-statement-settlements" aria-label="Settlements">
         <h3>Settlements</h3>
         {bill.settlements.length === 0 ? (
-          <p className="resident-statement-settlement-empty">No payments applied to this bill yet.</p>
+          <p className="resident-statement-settlement-empty">
+            No payments applied to this bill yet.
+          </p>
         ) : (
           <div>
             {bill.settlements.map((settlement) => (
-              <Settlement key={settlement.transactionId} settlement={settlement} />
+              <Settlement
+                key={settlement.transactionId}
+                settlement={settlement}
+                onViewReceipt={onViewReceipt}
+                receiptLoading={receiptLoading}
+                isLoading={loadingTransactionId === settlement.transactionId}
+              />
             ))}
           </div>
         )}
@@ -244,7 +318,17 @@ function StatementBill({ bill }: { bill: ResidentBillingStatementBill }) {
   );
 }
 
-function Settlement({ settlement }: { settlement: ResidentStatementSettlement }) {
+function Settlement({
+  settlement,
+  onViewReceipt,
+  receiptLoading,
+  isLoading,
+}: {
+  settlement: ResidentStatementSettlement;
+  onViewReceipt: (transactionId: string) => void;
+  receiptLoading: boolean;
+  isLoading: boolean;
+}) {
   return (
     <dl className="resident-statement-settlement">
       <MoneyRow label={methodLabel(settlement.method)} value={settlement.netAppliedMinor} />
@@ -258,7 +342,145 @@ function Settlement({ settlement }: { settlement: ResidentStatementSettlement })
           <dd>{settlement.reference}</dd>
         </div>
       )}
+      <div>
+        <dt>Official receipt</dt>
+        <dd>
+          <button
+            type="button"
+            className="resident-statement-receipt-link"
+            disabled={receiptLoading}
+            aria-label={`View receipt for payment ${settlement.reference || formatDate(new Date(settlement.receivedAt))}`}
+            onClick={() => onViewReceipt(settlement.transactionId)}
+          >
+            {isLoading ? 'Loading…' : 'View Receipt'}
+          </button>
+        </dd>
+      </div>
     </dl>
+  );
+}
+
+function ResidentV2ReceiptPanel({
+  receipt,
+  loading,
+  failed,
+  onRetry,
+}: {
+  receipt: ResidentBillingV2Receipt | null;
+  loading: boolean;
+  failed: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <section className="resident-v2-receipt" aria-labelledby="resident-v2-receipt-title">
+      {loading ? (
+        <div className="resident-statement-state" role="status">
+          <span className="resident-statement-spinner" aria-hidden="true" />
+          <span>Loading verified receipt…</span>
+        </div>
+      ) : failed ? (
+        <div className="resident-statement-error" role="alert">
+          <h2>Receipt unavailable</h2>
+          <p>{RESIDENT_BILLING_V2_RECEIPT_ERROR}</p>
+          <button type="button" className="resident-statement-retry" onClick={onRetry}>
+            Retry
+          </button>
+        </div>
+      ) : receipt ? (
+        <article className="resident-v2-receipt-paper">
+          <header>
+            <div className="resident-v2-receipt-brand">HOMINODE</div>
+            <div>
+              <span>Official payment receipt</span>
+              <h2 id="resident-v2-receipt-title">{receipt.receiptId}</h2>
+            </div>
+          </header>
+          <section className="resident-v2-receipt-community">
+            <h3>{receipt.communityName || 'Community'}</h3>
+            {receipt.communityAddress && <p>{receipt.communityAddress}</p>}
+          </section>
+          <dl className="resident-v2-receipt-details">
+            <ReceiptRow
+              label="Amount received"
+              value={formatInrMinorUnits(receipt.moneyReceivedMinor)}
+            />
+            <ReceiptRow label="Payment date" value={formatDate(new Date(receipt.receivedAt))} />
+            <ReceiptRow label="Payment method" value={methodLabel(receipt.method)} />
+            <ReceiptRow label="Receipt number" value={receipt.receiptId} />
+            {receipt.paymentReference && (
+              <ReceiptRow label="Payment reference" value={receipt.paymentReference} />
+            )}
+            <ReceiptRow label="Verified by" value={receipt.verifiedBy} />
+            <ReceiptRow label="Verified date" value={formatDate(new Date(receipt.verifiedAt))} />
+          </dl>
+          {receipt.claimedAmountMinor !== null && receipt.amountMismatch === true && (
+            <p className="resident-v2-receipt-note">
+              The resident claim was {formatInrMinorUnits(receipt.claimedAmountMinor)}. This receipt
+              shows the amount verified by the Community Admin.
+            </p>
+          )}
+          <section aria-label="This payment allocations" className="resident-v2-receipt-section">
+            <h3>Allocations from this payment</h3>
+            {receipt.allocations.length ? (
+              <dl>
+                {receipt.allocations.map((allocation, index) => (
+                  <ReceiptRow
+                    key={`${receipt.transactionId}-allocation-${index}`}
+                    label={`Bill allocation ${index + 1}`}
+                    value={formatInrMinorUnits(allocation.amountMinor)}
+                  />
+                ))}
+              </dl>
+            ) : (
+              <p>No bill allocation was recorded for this payment.</p>
+            )}
+            <ReceiptRow
+              label="Excess credit created"
+              value={formatInrMinorUnits(receipt.excessCreditMinor)}
+            />
+            <p>
+              Existing credit applied to bills is not counted as money received on this receipt.
+            </p>
+          </section>
+          {(receipt.reversedAllocationMinor > 0 || receipt.revisionCreditIssuedMinor > 0) && (
+            <section className="resident-v2-receipt-section">
+              <h3>Later bill revision adjustments</h3>
+              <dl>
+                <ReceiptRow
+                  label="Reversed allocations"
+                  value={formatInrMinorUnits(receipt.reversedAllocationMinor)}
+                />
+                <ReceiptRow
+                  label="Revision credit issued"
+                  value={formatInrMinorUnits(receipt.revisionCreditIssuedMinor)}
+                />
+              </dl>
+              <p>These later changes do not alter the original amount received.</p>
+            </section>
+          )}
+          <button
+            type="button"
+            className="resident-v2-receipt-print"
+            onClick={() => window.print()}
+          >
+            Print / Download PDF
+          </button>
+          <p className="resident-v2-receipt-footer">
+            This receipt records the original Admin-verified settlement. No pending or rejected
+            proof is an official receipt.
+          </p>
+        </article>
+      ) : null}
+    </section>
+  );
+}
+
+function ReceiptRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
   );
 }
 

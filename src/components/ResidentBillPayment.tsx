@@ -1,6 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { latestPaymentForBill, prepareDirectUpiPayment, submitProof } from '../actions';
+import {
+  flexibleResidentV2PaymentAmountsEnabled,
+  latestPaymentForBill,
+  parseInrMinorUnits,
+  prepareDirectUpiPayment,
+  submitProof,
+} from '../actions';
 import { Modal } from '../components';
 import {
   dateLabel,
@@ -25,6 +31,10 @@ function isBillSettled(bill: Data) {
   );
 }
 
+function inrMinorText(value: number): string {
+  return `${Math.floor(value / 100)}.${String(value % 100).padStart(2, '0')}`;
+}
+
 function V2BillSummary({ bill }: { bill: Data }) {
   const rows: [string, unknown][] = [
     ['Total', bill.amountMinor],
@@ -34,7 +44,7 @@ function V2BillSummary({ bill }: { bill: Data }) {
   ];
   const lines = Array.isArray(bill.chargeLines) ? bill.chargeLines : [];
   return (
-    <dl className="detail-fields payment-settlement-summary" aria-label="V2 bill breakdown">
+    <dl className="detail-fields payment-settlement-summary" aria-label="Bill breakdown">
       {rows.map(([label, value]) => (
         <div key={label}>
           <dt>{label}</dt>
@@ -108,6 +118,7 @@ export function ResidentBillPayment({
   latestPayment,
   loading,
   onPaymentUpdated,
+  flexibleAmountsEnabled = flexibleResidentV2PaymentAmountsEnabled,
 }: {
   session: Session;
   billId: string;
@@ -115,6 +126,7 @@ export function ResidentBillPayment({
   latestPayment: Data | null;
   loading: boolean;
   onPaymentUpdated: (payment: Data | null) => void;
+  flexibleAmountsEnabled?: boolean;
 }) {
   const [preparation, setPreparation] = useState<Awaited<
     ReturnType<typeof prepareDirectUpiPayment>
@@ -127,11 +139,36 @@ export function ResidentBillPayment({
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState('');
   const [cashDetailsOpen, setCashDetailsOpen] = useState(false);
+  const [amountText, setAmountText] = useState(() =>
+    isV2Bill(bill) && Number.isSafeInteger(bill.outstandingAmountMinor)
+      ? inrMinorText(bill.outstandingAmountMinor as number)
+      : '',
+  );
+  const [requiresIntentRefresh, setRequiresIntentRefresh] = useState(false);
+  const [preparedIntentAmountMinor, setPreparedIntentAmountMinor] = useState<number | null>(null);
+  const resetAmountText =
+    isV2Bill(bill) && Number.isSafeInteger(bill.outstandingAmountMinor)
+      ? inrMinorText(bill.outstandingAmountMinor as number)
+      : '';
+  useEffect(() => {
+    setAmountText(resetAmountText);
+    setPreparation(null);
+    setRequiresIntentRefresh(false);
+    setPreparedIntentAmountMinor(null);
+  }, [
+    billId,
+    bill.communityId,
+    bill.currentRevisionId,
+    bill.outstandingAmountMinor,
+    resetAmountText,
+  ]);
   const billStatus = str(bill.status).toLowerCase();
   const paymentStatus = str(latestPayment?.status).toLowerCase();
   const isV2 = isV2Bill(bill);
   const validV2 = !isV2 || isValidV2InrBill(bill);
   const outstanding = isV2 && validV2 ? (bill.outstandingAmountMinor as number) : 0;
+  const selectedAmountMinor = isV2 ? parseInrMinorUnits(amountText) : null;
+  const amountDifference = selectedAmountMinor == null ? null : selectedAmountMinor - outstanding;
   const eligible = isV2
     ? validV2 && ['pending', 'overdue', 'partially_paid'].includes(billStatus) && outstanding > 0
     : ['pending', 'overdue'].includes(billStatus);
@@ -152,7 +189,19 @@ export function ResidentBillPayment({
     setPreparing(true);
     setMessage('');
     try {
-      setPreparation(await prepareDirectUpiPayment(session, billId));
+      if (isV2 && selectedAmountMinor == null) {
+        setMessage('Enter a valid INR amount with up to two decimal places.');
+        return;
+      }
+      const prepared = await prepareDirectUpiPayment(
+        session,
+        billId,
+        isV2 ? selectedAmountMinor! : undefined,
+        isV2 && flexibleAmountsEnabled,
+      );
+      setPreparation(prepared);
+      setPreparedIntentAmountMinor(prepared.paymentAmountMinor ?? null);
+      setRequiresIntentRefresh(false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'UPI payment could not be prepared.');
     } finally {
@@ -174,7 +223,38 @@ export function ResidentBillPayment({
     setUploading(true);
     setMessage('');
     try {
-      await submitProof(session, billId, file, reference);
+      if (isV2 && selectedAmountMinor == null) {
+        setMessage('Enter a valid INR amount with up to two decimal places.');
+        return;
+      }
+      const amountForAttempt = preparation?.paymentAmountMinor ?? selectedAmountMinor ?? undefined;
+      if (
+        requiresIntentRefresh ||
+        (preparedIntentAmountMinor != null && preparedIntentAmountMinor !== selectedAmountMinor)
+      ) {
+        setMessage(
+          'The amount changed after UPI preparation. Prepare a fresh UPI payment amount before submitting.',
+        );
+        return;
+      }
+      if (
+        isV2 &&
+        preparation?.paymentAmountMinor != null &&
+        preparation.paymentAmountMinor !== selectedAmountMinor
+      ) {
+        setMessage(
+          'The amount changed after UPI preparation. Prepare a fresh UPI payment amount before submitting.',
+        );
+        return;
+      }
+      await submitProof(
+        session,
+        billId,
+        file,
+        reference,
+        amountForAttempt,
+        isV2 && flexibleAmountsEnabled,
+      );
       setFile(null);
       setReference('');
       setProofOpen(false);
@@ -259,9 +339,48 @@ export function ResidentBillPayment({
                 <h3>Direct UPI</h3>
                 <p>
                   {isV2
-                    ? 'Pay the exact outstanding amount using the community’s verified UPI details.'
+                    ? 'Pay directly to your community using its verified UPI details. Your Admin confirms the actual amount received.'
                     : 'Pay the exact bill amount using the community’s verified UPI details.'}
                 </p>
+                {isV2 && !pending && (
+                  <div className="resident-payment-amount">
+                    <p>
+                      <strong>Selected bill outstanding:</strong> {formatInrMinorUnits(outstanding)}
+                    </p>
+                    <label>
+                      Payment amount (INR)
+                      <input
+                        inputMode="decimal"
+                        type="text"
+                        value={amountText}
+                        disabled={!flexibleAmountsEnabled || pending || uploading}
+                        onChange={(event) => {
+                          if (
+                            preparedIntentAmountMinor != null &&
+                            parseInrMinorUnits(event.target.value) !== preparedIntentAmountMinor
+                          )
+                            setRequiresIntentRefresh(true);
+                          setAmountText(event.target.value);
+                          setPreparation(null);
+                          setMessage('');
+                        }}
+                        aria-describedby="resident-payment-amount-help"
+                      />
+                    </label>
+                    {amountDifference != null && (
+                      <p>
+                        Difference from selected bill:{' '}
+                        {amountDifference > 0 ? '+' : amountDifference < 0 ? '−' : ''}
+                        {formatInrMinorUnits(Math.abs(amountDifference))}
+                      </p>
+                    )}
+                    <small id="resident-payment-amount-help">
+                      {flexibleAmountsEnabled
+                        ? 'Only excess confirmed by your Admin can be allocated to other outstanding bills or resident credit.'
+                        : 'Flexible payment amounts will be available after the compatible Admin verification release.'}
+                    </small>
+                  </div>
+                )}
                 {isV2 && pending && !proofOpen && (
                   <button type="button" onClick={() => setProofOpen(true)}>
                     Resume receipt upload
@@ -273,7 +392,7 @@ export function ResidentBillPayment({
                       <button
                         type="button"
                         className="primary"
-                        disabled={preparing}
+                        disabled={preparing || (isV2 && selectedAmountMinor == null)}
                         onClick={() => void prepare()}
                       >
                         {preparing ? 'Preparing UPI payment…' : 'Pay via UPI'}
@@ -411,17 +530,26 @@ export function ResidentBillPayment({
                 <dd>{preparation.vpa}</dd>
               </div>
               <div>
-                <dt>{preparation.schemaVersion === 2 ? 'Outstanding amount' : 'Bill amount'}</dt>
+                <dt>{preparation.schemaVersion === 2 ? 'Payment amount' : 'Bill amount'}</dt>
                 <dd>
                   {preparation.schemaVersion === 2
-                    ? formatInrMinorUnits(preparation.outstandingAmountMinor)
+                    ? formatInrMinorUnits(
+                        preparation.paymentAmountMinor ?? preparation.outstandingAmountMinor,
+                      )
                     : `₹${preparation.amount.toFixed(2)}`}
                 </dd>
               </div>
+              {preparation.schemaVersion === 2 && (
+                <div>
+                  <dt>Selected bill outstanding</dt>
+                  <dd>{formatInrMinorUnits(preparation.outstandingAmountMinor)}</dd>
+                </div>
+              )}
             </dl>
             <p className="direct-upi-note">
-              This QR code prepares your payment. Your bill will remain unpaid until management
-              reviews your payment proof.
+              Launching or returning from a UPI app does not confirm payment. Your bill remains
+              pending Admin verification until your community administrator confirms the received
+              funds. Only Admin-confirmed excess may be allocated to other bills or resident credit.
             </p>
             <div className="resident-bill-payment-actions">
               <button type="button" onClick={() => void copyVpa()}>
@@ -431,7 +559,6 @@ export function ResidentBillPayment({
                 type="button"
                 className="primary"
                 onClick={() => {
-                  setPreparation(null);
                   setProofOpen(true);
                   setCopyMessage('');
                 }}

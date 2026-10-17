@@ -65,6 +65,8 @@ export interface DirectUpiPaymentPreparation {
   paymentUri: string;
   schemaVersion?: 2;
   amountMinor?: number;
+  paymentAmountMinor?: number;
+  amountContractVersion?: 2;
   outstandingAmountMinor?: number;
   currentRevisionId?: string;
 }

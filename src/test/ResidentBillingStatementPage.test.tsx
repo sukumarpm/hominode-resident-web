@@ -7,6 +7,10 @@ import {
   RESIDENT_BILLING_STATEMENT_ERROR,
   type ResidentBillingStatement,
 } from '../residentBillingStatement';
+import {
+  RESIDENT_BILLING_V2_RECEIPT_ERROR,
+  type ResidentBillingV2Receipt,
+} from '../residentBillingV2Receipt';
 import { AuthContext, type AuthState } from '../session';
 import { APP_ROLE } from '../role';
 import { makeSession } from './fixtures';
@@ -108,15 +112,45 @@ function renderPage(
     period: string,
   ) => Promise<ResidentBillingStatement>,
   now = () => new Date(2026, 7, 20),
+  loadReceipt?: (
+    session: ReturnType<typeof makeSession>,
+    transactionId: string,
+  ) => Promise<ResidentBillingV2Receipt>,
 ) {
   const session = makeSession('resident');
   return {
     session,
     ...render(
       <AuthContext value={authState(session)}>
-        <ResidentBillingStatementPage loadStatement={loadStatement} now={now} />
+        <ResidentBillingStatementPage
+          loadStatement={loadStatement}
+          loadReceipt={loadReceipt}
+          now={now}
+        />
       </AuthContext>,
     ),
+  };
+}
+
+function receipt(transactionId: string): ResidentBillingV2Receipt {
+  return {
+    receiptId: `HOMINODE-V2-${transactionId}`,
+    transactionId,
+    communityName: 'Backend Community',
+    communityAddress: 'Verified Address',
+    method: 'upi',
+    paymentReference: 'UPI-RECEIPT-42',
+    receivedAt: 1785542400000,
+    moneyReceivedMinor: 1250,
+    claimedAmountMinor: 1200,
+    amountMismatch: true,
+    verifiedAt: 1785542401000,
+    verifiedBy: 'Community Admin',
+    allocations: [{ amountMinor: 1000, allocatedAt: 1785542400000 }],
+    allocatedAmountMinor: 1000,
+    excessCreditMinor: 250,
+    reversedAllocationMinor: 100,
+    revisionCreditIssuedMinor: 100,
   };
 }
 
@@ -128,10 +162,9 @@ it('defaults to the current local month and renders the canonical summary with e
   expect(screen.getByText('Billing and payment activity for your account.')).toBeInTheDocument();
   expect(await screen.findByRole('heading', { name: 'Statement Summary' })).toBeInTheDocument();
   expect(
-    within(screen.getByRole('region', { name: 'Statement month selector' })).getByRole(
-      'heading',
-      { name: 'August 2026' },
-    ),
+    within(screen.getByRole('region', { name: 'Statement month selector' })).getByRole('heading', {
+      name: 'August 2026',
+    }),
   ).toBeInTheDocument();
   expect(loader).toHaveBeenCalledWith(expect.anything(), '2026-08');
   expect(screen.getByText('Total billed')).toBeInTheDocument();
@@ -185,6 +218,57 @@ it('renders charge lines, settlement method, net amount, received date and refer
   expect(screen.getByText('BANK-55')).toBeInTheDocument();
   expect(screen.getByText('Due date')).toBeInTheDocument();
   expect(screen.getByText(/Aug 15, 2026/)).toBeInTheDocument();
+});
+
+it('opens separate official receipts for each verified partial settlement', async () => {
+  const value = statement('2026-08');
+  value.bills[0].settlements.push({
+    transactionId: 'tx-2',
+    method: 'upi',
+    reference: 'UPI-56',
+    receivedAt: 1785542500000,
+    netAppliedMinor: 5000,
+  });
+  value.bills[0].paidAllocationMinor += 5000;
+  value.bills[0].outstandingMinor -= 5000;
+  value.summary.paidAllocationMinor += 5000;
+  value.summary.outstandingMinor -= 5000;
+  const loadReceipt = vi.fn(async (_session, transactionId: string) => receipt(transactionId));
+  renderPage(async () => value, undefined, loadReceipt);
+
+  const receiptButtons = await screen.findAllByRole('button', { name: /View receipt for payment/ });
+  expect(receiptButtons).toHaveLength(2);
+  fireEvent.click(receiptButtons[1]);
+
+  expect(await screen.findByText('Backend Community')).toBeInTheDocument();
+  expect(screen.getByText('₹12.50')).toBeInTheDocument();
+  expect(screen.getByText('₹10.00')).toBeInTheDocument();
+  expect(screen.getByText('₹2.50')).toBeInTheDocument();
+  expect(screen.getByText('Later bill revision adjustments')).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      'This receipt records the original Admin-verified settlement. No pending or rejected proof is an official receipt.',
+    ),
+  ).toBeInTheDocument();
+  expect(loadReceipt).toHaveBeenCalledWith(expect.anything(), 'tx-2');
+  expect(screen.queryByText('private-bill-id')).not.toBeInTheDocument();
+});
+
+it('shows a safe receipt error and retries the same settlement', async () => {
+  let attempts = 0;
+  const loadReceipt = vi.fn(async (_session, transactionId: string) => {
+    attempts += 1;
+    if (attempts === 1) throw new Error('private callable details');
+    return receipt(transactionId);
+  });
+  renderPage(async (_session, period) => statement(period), undefined, loadReceipt);
+  fireEvent.click(await screen.findByRole('button', { name: /View receipt for payment/ }));
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(RESIDENT_BILLING_V2_RECEIPT_ERROR);
+  expect(screen.queryByText(/private callable details/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  expect(await screen.findByText('Backend Community')).toBeInTheDocument();
+  expect(loadReceipt).toHaveBeenCalledTimes(2);
 });
 
 it('omits a missing payment reference', async () => {

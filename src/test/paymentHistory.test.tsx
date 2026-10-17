@@ -296,7 +296,7 @@ it('fails the whole V2 history when one transaction is malformed', () => {
     { id: 'txn-invalid', data: transaction('txn-invalid', { amountMinor: 0 }) },
   ]);
   expect(screen.getByRole('alert')).toHaveTextContent(
-    'Billing V2 payment history could not be validated.',
+    'Payment history could not be validated.',
   );
   expect(screen.queryByRole('heading', { name: 'txn-valid' })).not.toBeInTheDocument();
   expect(screen.queryByText('No payments to display yet.')).not.toBeInTheDocument();

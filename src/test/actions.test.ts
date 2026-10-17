@@ -23,6 +23,7 @@ const m = vi.hoisted(() => ({
   config: {} as Data,
   proofs: [] as Data[],
   metadata: vi.fn(),
+  notification: {} as Data,
 }));
 vi.mock('../firebase', () => ({
   firebase: () => ({ auth: { currentUser: m.user }, db: {}, storage: {} }),
@@ -57,6 +58,7 @@ import {
   createComplaint,
   createVisitor,
   currentAuthority,
+  residentNotificationDestination,
   prepareDirectUpiPayment,
   submitProof,
   latestPaymentForBill,
@@ -82,10 +84,23 @@ beforeEach(() => {
     directUpi: { enabled: true, payeeName: 'Green Valley', vpa: 'greenvalley@okaxis' },
   };
   m.proofs = [];
+  m.notification = {
+    communityId: 'community-1',
+    recipientId: 'resident-1',
+    audience: 'resident',
+    role: 'resident',
+    appId: 'resident',
+    type: 'notice',
+    eventType: 'notice_published',
+    data: {},
+  };
   localStorage.clear();
   m.get.mockImplementation(async (path: string) => ({
+    exists: () => true,
     data: () =>
-      path.startsWith('communities/')
+      path.startsWith('notifications/')
+        ? m.notification
+        : path.startsWith('communities/')
         ? { name: 'Green Valley', slug: 'green-valley', isActive: true }
         : path.startsWith('bills/')
           ? m.bill
@@ -128,29 +143,27 @@ it('creates complaints with canonical ownership and pending status', async () =>
     }),
   );
 });
-it('creates expected visitor passes without granting entry', async () => {
+it('creates visitor invitations through the protected callable without client-generated secrets', async () => {
+  m.call.mockResolvedValue({ visitorId: 'visitor-1' });
   await createVisitor(makeSession(), {
     visitorName: 'Test Visitor',
     purpose: 'Friend',
     expectedArrival: '2099-09-09T12:00',
   });
-  const payload = m.add.mock.calls[0][1];
-  expect(payload).toEqual(
+  expect(m.call).toHaveBeenCalledWith(
+    'createVisitorInvitation',
     expect.objectContaining({
-      communityId: 'community-1',
-      hostUserId: 'resident-1',
-      flatId: 'unit-1',
-      status: 'expected',
-      isApproved: false,
-      approvedBy: null,
-      approvedAt: null,
-      actualArrival: null,
-      departure: null,
+      visitorName: 'Test Visitor',
+      purpose: 'Friend',
+      expectedArrival: new Date('2099-09-09T12:00').getTime(),
     }),
   );
-  expect(payload.visitorPassCode).toMatch(/^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
-  expect(payload.qrToken).toHaveLength(32);
-  expect(payload).not.toHaveProperty('checkedInAt');
+  const request = m.call.mock.calls[0][1];
+  expect(request).not.toHaveProperty('qrToken');
+  expect(request).not.toHaveProperty('visitorPassCode');
+  expect(request).not.toHaveProperty('communityId');
+  expect(request).not.toHaveProperty('flatId');
+  expect(m.add).not.toHaveBeenCalledWith('visitors', expect.anything());
 });
 it('refuses stale unit assignments before writing', async () => {
   m.profile = { ...residentData, flatId: 'different-unit' };
@@ -173,6 +186,62 @@ it('revalidates current admin assignments before mutations', async () => {
   };
   m.profile = { ...adminData, authorizedCommunityIds: ['community-2'] };
   await expect(currentAuthority(session)).rejects.toThrow('Community access revoked');
+});
+it('routes only an owned Billing V2 payment notification to billing', async () => {
+  m.notification = {
+    communityId: 'community-1',
+    recipientId: 'resident-1',
+    audience: 'resident',
+    role: 'resident',
+    appId: 'resident',
+    type: 'payment',
+    eventType: 'payment_proof_verified',
+    data: { route: 'billing', eventType: 'payment_proof_verified' },
+  };
+  await expect(residentNotificationDestination(makeSession(), 'notice-1')).resolves.toBe(
+    'billing',
+  );
+  expect(m.get).toHaveBeenCalledWith('notifications/notice-1');
+});
+it.each([
+  ['wrong resident', { recipientId: 'resident-2' }],
+  ['wrong community', { communityId: 'community-2' }],
+])('denies a payment notification with %s', async (_label, overrides) => {
+  m.notification = {
+    communityId: 'community-1',
+    recipientId: 'resident-1',
+    audience: 'resident',
+    role: 'resident',
+    appId: 'resident',
+    type: 'payment',
+    eventType: 'payment_proof_verified',
+    data: { route: 'billing', eventType: 'payment_proof_verified' },
+    ...overrides,
+  };
+  await expect(residentNotificationDestination(makeSession(), 'notice-1')).rejects.toThrow(
+    'Notification access denied',
+  );
+});
+it.each([
+  ['nonpayment', { type: 'notice' }],
+  ['unsupported event', { eventType: 'payment_refunded' }],
+  ['missing route', { data: { eventType: 'payment_proof_verified' } }],
+  ['mismatched event metadata', { data: { route: 'billing', eventType: 'payment_proof_rejected' } }],
+])('uses notification details for %s metadata', async (_label, overrides) => {
+  m.notification = {
+    communityId: 'community-1',
+    recipientId: 'resident-1',
+    audience: 'resident',
+    role: 'resident',
+    appId: 'resident',
+    type: 'payment',
+    eventType: 'payment_proof_verified',
+    data: { route: 'billing', eventType: 'payment_proof_verified' },
+    ...overrides,
+  };
+  await expect(residentNotificationDestination(makeSession(), 'notice-1')).resolves.toBe(
+    'details',
+  );
 });
 it('rejects invalid receipt files without uploading', async () => {
   await expect(
@@ -376,6 +445,66 @@ it('prepares V2 Direct UPI for the exact outstanding minor-unit amount', async (
   const paisePrepared = await prepareDirectUpiPayment(makeSession(), 'bill-1');
   expect(new URL(paisePrepared.paymentUri).searchParams.get('am')).toBe('1234.56');
   expect(m.getMany.mock.calls[0][0].collection).toBe('paymentProofsV2');
+});
+
+it.each([
+  ['partial', 60025, '600.25'],
+  ['exact', 120000, '1200.00'],
+  ['excess', 150025, '1500.25'],
+] as const)('prepares the %s flexible V2 amount in paise', async (_kind, minor, amountText) => {
+  m.bill = v2Bill({ status: 'partially_paid' });
+  const prepared = await prepareDirectUpiPayment(makeSession(), 'bill-1', minor, true);
+  expect(prepared.paymentAmountMinor).toBe(minor);
+  expect(prepared.outstandingAmountMinor).toBe(120000);
+  expect(prepared.amountContractVersion).toBe(2);
+  expect(new URL(prepared.paymentUri).searchParams.get('am')).toBe(amountText);
+});
+
+it('sends amountContractVersion 2 with a flexible proof and preserves the exact resident claim', async () => {
+  m.bill = v2Bill({ status: 'partially_paid' });
+  m.call.mockResolvedValue({
+    paymentId: 'proof-v2-flexible',
+    receiptPath: 'payment_receipts/community-1/bill-1/resident-1/proof-v2-flexible.png',
+    status: 'pending',
+  });
+  await submitProof(
+    makeSession(),
+    'bill-1',
+    new File(['receipt'], 'proof.png', { type: 'image/png' }),
+    ' UPI-REF ',
+    130025,
+    true,
+  );
+  expect(m.call).toHaveBeenCalledWith(
+    'preparePaymentProofV2',
+    expect.objectContaining({
+      submittedAmountMinor: 130025,
+      amountContractVersion: 2,
+      paymentReference: 'UPI-REF',
+    }),
+  );
+});
+
+it('reuses a flexible attempt key on retry but changes it if the submitted amount changes', async () => {
+  m.bill = v2Bill({ status: 'partially_paid' });
+  const file = new File(['receipt'], 'proof.png', { type: 'image/png' });
+  m.call.mockRejectedValueOnce(new Error('temporary callable failure'));
+  await expect(submitProof(makeSession(), 'bill-1', file, '', 60000, true)).rejects.toThrow(
+    'temporary callable failure',
+  );
+  const firstKey = m.call.mock.calls[0][1].idempotencyKey;
+  m.call.mockRejectedValueOnce(new Error('temporary callable failure'));
+  await expect(submitProof(makeSession(), 'bill-1', file, '', 60000, true)).rejects.toThrow(
+    'temporary callable failure',
+  );
+  const retryKey = m.call.mock.calls[1][1].idempotencyKey;
+  expect(retryKey).toBe(firstKey);
+
+  m.call.mockRejectedValueOnce(new Error('temporary callable failure'));
+  await expect(submitProof(makeSession(), 'bill-1', file, '', 70000, true)).rejects.toThrow(
+    'temporary callable failure',
+  );
+  expect(m.call.mock.calls[2][1].idempotencyKey).not.toBe(firstKey);
 });
 
 it('rejects non-INR and zero-outstanding V2 bills before payment preparation', async () => {

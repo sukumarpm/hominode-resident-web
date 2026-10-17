@@ -1,7 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { ResidentBillPayment } from '../components/ResidentBillPayment';
-import { billingAmountLabel, paymentAttributionLabel, paymentMethodLabel } from '../models';
+import {
+  billingAmountLabel,
+  formatInrMinorUnits,
+  paymentAttributionLabel,
+  paymentMethodLabel,
+} from '../models';
 import { makeSession } from './fixtures';
 
 const paymentActions = vi.hoisted(() => ({
@@ -11,6 +16,14 @@ const paymentActions = vi.hoisted(() => ({
 }));
 
 vi.mock('../actions', () => ({
+  flexibleResidentV2PaymentAmountsEnabled: false,
+  parseInrMinorUnits: (input: string) => {
+    const value = input.trim();
+    if (!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value)) return null;
+    const [whole, fraction = ''] = value.split('.');
+    const result = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
+    return Number.isSafeInteger(result) && result > 0 ? result : null;
+  },
   prepareDirectUpiPayment: paymentActions.prepare,
   submitProof: paymentActions.submit,
   latestPaymentForBill: paymentActions.latest,
@@ -59,7 +72,12 @@ it('shows a local QR modal with the server-prepared payee, VPA and exact amount'
   );
 
   fireEvent.click(screen.getByRole('button', { name: 'Pay via UPI' }));
-  expect(paymentActions.prepare).toHaveBeenCalledWith(expect.anything(), 'bill-1');
+  expect(paymentActions.prepare).toHaveBeenCalledWith(
+    expect.anything(),
+    'bill-1',
+    undefined,
+    false,
+  );
   expect(await screen.findByRole('dialog', { name: 'Pay via UPI' })).toBeInTheDocument();
   expect(screen.getByText('Scan using any UPI app on your phone.')).toBeInTheDocument();
   expect(screen.getByText('Green Valley Society')).toBeInTheDocument();
@@ -149,6 +167,140 @@ it('shows pending Direct UPI proof and Admin review clearly', () => {
   expect(screen.getByText('Admin verification is pending.')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Pay via UPI' })).not.toBeInTheDocument();
   expect(screen.getByRole('heading', { name: 'Cash' })).toBeInTheDocument();
+});
+
+it.each([
+  ['partial', '600.25', 60025, '−₹599.75'],
+  ['exact', '1200.00', 120000, '₹0.00'],
+  ['excess', '1300.25', 130025, '+₹100.25'],
+] as const)(
+  'uses the same %s amount for UPI preparation and proof',
+  async (_kind, amount, minor, difference) => {
+    paymentActions.prepare.mockResolvedValueOnce({
+      billId: 'bill-1',
+      schemaVersion: 2,
+      amount: minor / 100,
+      paymentAmountMinor: minor,
+      outstandingAmountMinor: 120000,
+      amountContractVersion: 2,
+      vpa: 'greenvalley@okaxis',
+      payeeName: 'Green Valley Society',
+      paymentUri: `upi://pay?am=${amount}&cu=INR`,
+    });
+    paymentActions.submit.mockResolvedValueOnce({ id: 'proof-1', status: 'pending' });
+    paymentActions.latest.mockResolvedValueOnce(null);
+    render(
+      <ResidentBillPayment
+        session={makeSession()}
+        billId="bill-1"
+        bill={v2Bill()}
+        latestPayment={null}
+        loading={false}
+        flexibleAmountsEnabled
+        onPaymentUpdated={vi.fn()}
+      />,
+    );
+    const amountInput = screen.getByLabelText('Payment amount (INR)');
+    fireEvent.change(amountInput, { target: { value: amount } });
+    expect(screen.getByText(`Difference from selected bill: ${difference}`)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Pay via UPI' }));
+    await waitFor(() =>
+      expect(paymentActions.prepare).toHaveBeenCalledWith(expect.anything(), 'bill-1', minor, true),
+    );
+    expect((await screen.findAllByText(formatInrMinorUnits(minor))).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: 'I have paid – submit payment proof' }));
+    const receipt = new File(['receipt'], 'receipt.png', { type: 'image/png' });
+    fireEvent.change(screen.getByLabelText('Payment receipt image'), {
+      target: { files: [receipt] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit payment proof' }));
+    await waitFor(() =>
+      expect(paymentActions.submit).toHaveBeenCalledWith(
+        expect.anything(),
+        'bill-1',
+        receipt,
+        '',
+        minor,
+        true,
+      ),
+    );
+  },
+);
+
+it('keeps flexible amounts disabled by default and parses paise without rounding', () => {
+  render(
+    <ResidentBillPayment
+      session={makeSession()}
+      billId="bill-1"
+      bill={v2Bill()}
+      latestPayment={null}
+      loading={false}
+      onPaymentUpdated={vi.fn()}
+    />,
+  );
+  expect(screen.getByLabelText('Payment amount (INR)')).toBeDisabled();
+  expect(screen.getByLabelText('Payment amount (INR)')).toHaveValue('1200.00');
+  expect(screen.getByText(/Flexible payment amounts will be available/)).toBeInTheDocument();
+});
+
+it('blocks invalid decimal amounts before preparing a UPI intent', () => {
+  render(
+    <ResidentBillPayment
+      session={makeSession()}
+      billId="bill-1"
+      bill={v2Bill()}
+      latestPayment={null}
+      loading={false}
+      flexibleAmountsEnabled
+      onPaymentUpdated={vi.fn()}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText('Payment amount (INR)'), {
+    target: { value: '10.999' },
+  });
+  expect(screen.getByRole('button', { name: 'Pay via UPI' })).toBeDisabled();
+  expect(paymentActions.prepare).not.toHaveBeenCalled();
+});
+
+it('requires fresh UPI preparation if the selected amount changes after intent preparation', async () => {
+  paymentActions.prepare.mockResolvedValueOnce({
+    billId: 'bill-1',
+    schemaVersion: 2,
+    paymentAmountMinor: 130025,
+    outstandingAmountMinor: 120000,
+    amountContractVersion: 2,
+    paymentUri: 'upi://pay?am=1300.25&cu=INR',
+    amount: 1300.25,
+    vpa: 'greenvalley@okaxis',
+    payeeName: 'Green Valley Society',
+  });
+  render(
+    <ResidentBillPayment
+      session={makeSession()}
+      billId="bill-1"
+      bill={v2Bill()}
+      latestPayment={null}
+      loading={false}
+      flexibleAmountsEnabled
+      onPaymentUpdated={vi.fn()}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText('Payment amount (INR)'), {
+    target: { value: '1300.25' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Pay via UPI' }));
+  await screen.findByRole('dialog', { name: 'Pay via UPI' });
+  fireEvent.click(screen.getByRole('button', { name: 'I have paid – submit payment proof' }));
+  fireEvent.change(screen.getByLabelText('Payment amount (INR)'), {
+    target: { value: '500.00' },
+  });
+  const receipt = new File(['receipt'], 'receipt.png', { type: 'image/png' });
+  fireEvent.change(screen.getByLabelText('Payment receipt image'), {
+    target: { files: [receipt] },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Submit payment proof' }));
+  expect(await screen.findByText(/amount changed after UPI preparation/)).toBeInTheDocument();
+  expect(paymentActions.submit).not.toHaveBeenCalled();
 });
 
 it('labels a legacy External latest payment as External', () => {
@@ -267,7 +419,7 @@ it('renders authoritative V2 balances and chargeLines', () => {
   expect(screen.getByText('Credit applied')).toBeInTheDocument();
   expect(screen.getByText('₹300.00')).toBeInTheDocument();
   expect(screen.getByText('Outstanding')).toBeInTheDocument();
-  expect(screen.getByText('₹1,200.00')).toBeInTheDocument();
+  expect(screen.getAllByText('₹1,200.00').length).toBeGreaterThanOrEqual(2);
   expect(screen.getByText('Maintenance: ₹2,000.00')).toBeInTheDocument();
   expect(screen.getByText('Water: ₹500.00')).toBeInTheDocument();
 });
@@ -296,7 +448,7 @@ it('keeps partially paid V2 bills with positive outstanding payable', async () =
 
   fireEvent.click(screen.getByRole('button', { name: 'Pay via UPI' }));
   expect(await screen.findByRole('dialog', { name: 'Pay via UPI' })).toBeInTheDocument();
-  expect(screen.getAllByText('₹1,234.56')).toHaveLength(2);
+  expect(screen.getAllByText('₹1,234.56').length).toBeGreaterThanOrEqual(2);
 });
 
 it('shows a completed V2 proof but permits a new payment for remaining balance', () => {

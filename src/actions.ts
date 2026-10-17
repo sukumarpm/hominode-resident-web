@@ -60,6 +60,17 @@ function minorAmountText(value: number): string {
   const paise = digits.slice(-2).padStart(2, '0');
   return `${whole}.${paise}`;
 }
+export const flexibleResidentV2PaymentAmountsEnabled = false;
+export function parseInrMinorUnits(input: string): number | null {
+  const value = input.trim();
+  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value)) return null;
+  const [wholeText, paiseText = ''] = value.split('.');
+  const whole = Number(wholeText);
+  if (!Number.isSafeInteger(whole) || whole > Math.floor(Number.MAX_SAFE_INTEGER / 100))
+    return null;
+  const minor = whole * 100 + Number(paiseText.padEnd(2, '0') || '0');
+  return Number.isSafeInteger(minor) && minor > 0 ? minor : null;
+}
 function timestampMillis(value: unknown): number {
   if (value && typeof value === 'object') {
     if ('toMillis' in value && typeof value.toMillis === 'function')
@@ -78,7 +89,10 @@ async function latestV2ProofForBill(s: Session, billId: string): Promise<Data | 
       where('billId', '==', billId),
     ),
   );
-  const proofs: Data[] = snapshot.docs.map((proof) => ({ ...(proof.data() as Data), id: proof.id }));
+  const proofs: Data[] = snapshot.docs.map((proof) => ({
+    ...(proof.data() as Data),
+    id: proof.id,
+  }));
   proofs.sort((a, b) => timestampMillis(b.submittedAt) - timestampMillis(a.submittedAt));
   return proofs[0] ?? null;
 }
@@ -101,7 +115,7 @@ function validateV2Bill(s: Session, bill: Data, billId: string) {
     !bill.currentRevisionId.trim() ||
     !billId
   )
-    throw Error('This V2 bill is unavailable or is not eligible for payment.');
+    throw Error('This bill is unavailable or is not eligible for payment.');
   return bill;
 }
 function receiptExtension(file: File): string {
@@ -137,26 +151,45 @@ function validatePendingV2Proof(s: Session, billId: string, proof: Data) {
     !receiptTypes[extension] ||
     receiptPath !== `${prefix}${paymentId}.${extension}`
   )
-    throw Error('The pending V2 payment proof is unavailable or invalid.');
+    throw Error('The pending payment proof is unavailable or invalid.');
   return { paymentId, receiptPath, extension };
 }
 function proofAttemptStorageKey(uid: string, billId: string) {
   return `hominode-v2-proof-attempt:${uid}:${billId}`;
 }
-function stableV2IdempotencyKey(uid: string, billId: string, afterProofId: string | null) {
+function stableV2IdempotencyKey(
+  uid: string,
+  billId: string,
+  afterProofId: string | null,
+  amountMinor: number,
+  amountContractVersion: number | null,
+) {
   const storageKey = proofAttemptStorageKey(uid, billId);
   const stored = localStorage.getItem(storageKey);
   if (stored) {
     try {
-      const attempt = JSON.parse(stored) as { key?: unknown; afterProofId?: unknown };
-      if (typeof attempt.key === 'string' && attempt.afterProofId === afterProofId)
+      const attempt = JSON.parse(stored) as {
+        key?: unknown;
+        afterProofId?: unknown;
+        amountMinor?: unknown;
+        amountContractVersion?: unknown;
+      };
+      if (
+        typeof attempt.key === 'string' &&
+        attempt.afterProofId === afterProofId &&
+        attempt.amountMinor === amountMinor &&
+        attempt.amountContractVersion === amountContractVersion
+      )
         return attempt.key;
     } catch {
       // Replace stale or malformed local attempt state with a fresh key.
     }
   }
   const idempotencyKey = crypto.randomUUID();
-  localStorage.setItem(storageKey, JSON.stringify({ key: idempotencyKey, afterProofId }));
+  localStorage.setItem(
+    storageKey,
+    JSON.stringify({ key: idempotencyKey, afterProofId, amountMinor, amountContractVersion }),
+  );
   return idempotencyKey;
 }
 async function assertExistingReceiptMatches(
@@ -186,12 +219,21 @@ async function submitV2Proof(
   file: File,
   transactionReference: string,
   bill: Data,
+  requestedAmountMinor?: number,
+  allowFlexibleAmounts = false,
 ) {
   validateV2Bill(s, bill, billId);
   if (bill.outstandingAmountMinor === 0) throw Error('This bill has no outstanding balance.');
   const reference = transactionReference.trim();
   if (reference.length > 200) throw Error('Reference number must be 200 characters or fewer.');
   const latestProof = await latestV2ProofForBill(s, billId);
+  const submittedAmountMinor = requestedAmountMinor ?? bill.outstandingAmountMinor;
+  if (
+    !isSafeMinor(submittedAmountMinor) ||
+    submittedAmountMinor <= 0 ||
+    (!allowFlexibleAmounts && submittedAmountMinor !== bill.outstandingAmountMinor)
+  )
+    throw Error('Enter a valid INR amount for this bill.');
   const ext = receiptExtension(file);
   if (!receiptTypes[ext] || file.size <= 0 || file.size >= 10 * 1024 * 1024)
     throw Error('Choose a JPG, PNG, HEIC or HEIF image smaller than 10 MB.');
@@ -230,11 +272,14 @@ async function submitV2Proof(
     latestProof && ['failed', 'completed'].includes(str(latestProof.status))
       ? str(latestProof.id)
       : null,
+    submittedAmountMinor,
+    allowFlexibleAmounts ? 2 : null,
   );
   const payload = {
     billId,
-    submittedAmountMinor: bill.outstandingAmountMinor,
+    submittedAmountMinor,
     submittedBillRevisionId: bill.currentRevisionId,
+    ...(allowFlexibleAmounts ? { amountContractVersion: 2 } : {}),
     idempotencyKey,
     receiptExtension: ext,
     paymentReference: reference || null,
@@ -270,12 +315,19 @@ async function submitV2Proof(
     billId,
     status: 'pending',
     submittedAmountMinor: payload.submittedAmountMinor,
+    ...(allowFlexibleAmounts ? { amountContractVersion: 2 } : {}),
     submittedBillRevisionId: payload.submittedBillRevisionId,
     receiptPath: prepared.receiptPath,
     paymentReference: payload.paymentReference,
   };
 }
-async function prepareV2DirectUpiPayment(s: Session, billId: string, bill: Data) {
+async function prepareV2DirectUpiPayment(
+  s: Session,
+  billId: string,
+  bill: Data,
+  requestedAmountMinor?: number,
+  allowFlexibleAmounts = false,
+) {
   validateV2Bill(s, bill, billId);
   if (bill.outstandingAmountMinor === 0) throw Error('This bill has no outstanding balance.');
   const latestProof = await latestV2ProofForBill(s, billId);
@@ -302,7 +354,13 @@ async function prepareV2DirectUpiPayment(s: Session, billId: string, bill: Data)
   const vpa = str('vpa' in directUpi ? directUpi.vpa : undefined);
   if (!payeeName || !vpa || !/^[^\s@]+@[^\s@]+$/.test(vpa))
     throw Error('Community Direct UPI details are invalid.');
-  const amountMinor = bill.outstandingAmountMinor as number;
+  const amountMinor = requestedAmountMinor ?? (bill.outstandingAmountMinor as number);
+  if (
+    !isSafeMinor(amountMinor) ||
+    amountMinor <= 0 ||
+    (!allowFlexibleAmounts && amountMinor !== bill.outstandingAmountMinor)
+  )
+    throw Error('Enter a valid INR amount for this bill.');
   const params = new URLSearchParams({
     pa: vpa,
     pn: payeeName,
@@ -313,12 +371,14 @@ async function prepareV2DirectUpiPayment(s: Session, billId: string, bill: Data)
     billId,
     amount: amountMinor / 100,
     amountMinor,
-    outstandingAmountMinor: amountMinor,
+    paymentAmountMinor: amountMinor,
+    outstandingAmountMinor: bill.outstandingAmountMinor as number,
     currentRevisionId: bill.currentRevisionId as string,
     schemaVersion: 2 as const,
     vpa,
     payeeName,
     paymentUri: `upi://pay?${params.toString()}`,
+    amountContractVersion: allowFlexibleAmounts ? (2 as const) : undefined,
   };
 }
 export async function createComplaint(session: Session, values: Record<string, string>) {
@@ -347,42 +407,17 @@ export async function createComplaint(session: Session, values: Record<string, s
 export async function createVisitor(session: Session, v: Record<string, string>) {
   const s = await currentAuthority(session);
   if (s.role !== 'resident') throw Error('A resident account is required.');
-  const p = s.profile;
   const arrival = new Date(v.expectedArrival);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   if (!Number.isFinite(arrival.getTime()) || arrival < today)
     throw Error('Choose a valid arrival date from today onwards.');
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const bytes = crypto.getRandomValues(new Uint8Array(8));
-  const pass = Array.from(bytes, (x) => alphabet[x % 32]).join('');
-  const token = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24))))
-    .replaceAll('+', '-')
-    .replaceAll('/', '_')
-    .replaceAll('=', '');
-  return addDoc(collection(firebase().db, 'visitors'), {
-    hostUserId: s.uid,
-    hostName: p.name,
-    hostEmail: str(p.data.email),
-    flatId: p.flatId,
-    flatLabel: p.flatLabel,
-    adminId: p.data.adminId ?? null,
-    communityId: s.community.id,
+  return call<{ visitorId: string }>('createVisitorInvitation', {
     visitorName: required(v.visitorName, 'Visitor name'),
     purpose: required(v.purpose, 'Purpose'),
-    expectedArrival: Timestamp.fromDate(arrival),
+    expectedArrival: arrival.getTime(),
     phoneNumber: v.phoneNumber?.trim() || null,
     vehicleNumber: v.vehicleNumber?.trim() || null,
-    visitorPassCode: pass.slice(0, 4) + '-' + pass.slice(4),
-    qrToken: token,
-    status: 'expected',
-    isApproved: false,
-    approvedBy: null,
-    approvedAt: null,
-    actualArrival: null,
-    departure: null,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
   });
 }
 export async function updateScoped(
@@ -407,6 +442,51 @@ export async function updateScoped(
   if (s.role !== 'admin') throw Error('An administrator is required.');
   await updateDoc(record, { ...fields, updatedAt: serverTimestamp() });
 }
+
+const BILLING_NOTIFICATION_EVENTS = new Set([
+  'payment_proof_submitted',
+  'payment_proof_verified',
+  'payment_proof_rejected',
+  'offline_payment_settled',
+]);
+
+/** Re-fetches and authorizes a resident notification before using its stored route metadata. */
+export async function residentNotificationDestination(
+  session: Session,
+  notificationId: string,
+): Promise<'billing' | 'details'> {
+  const s = await currentAuthority(session);
+  if (s.role !== 'resident' || !notificationId.trim())
+    throw Error('Notification access denied.');
+
+  const snapshot = await getDocFromServer(doc(firebase().db, 'notifications', notificationId));
+  const notification = snapshot.data();
+  if (
+    !snapshot.exists() ||
+    notification?.communityId !== s.community!.id ||
+    notification?.recipientId !== s.uid ||
+    notification?.audience !== 'resident' ||
+    notification?.role !== 'resident' ||
+    notification?.appId !== 'resident'
+  ) {
+    throw Error('Notification access denied.');
+  }
+
+  const eventType = notification.eventType;
+  const routeData = notification.data;
+  return notification.type === 'payment' &&
+    routeData !== null &&
+    typeof routeData === 'object' &&
+    'route' in routeData &&
+    routeData.route === 'billing' &&
+    typeof eventType === 'string' &&
+    BILLING_NOTIFICATION_EVENTS.has(eventType) &&
+    'eventType' in routeData &&
+    routeData.eventType === eventType
+    ? 'billing'
+    : 'details';
+}
+
 export async function publishNotice(session: Session, v: Record<string, string>) {
   const s = await currentAuthority(session);
   if (s.role !== 'admin') throw Error('An administrator is required.');
@@ -438,6 +518,8 @@ export async function residentLifecycle(
 export async function prepareDirectUpiPayment(
   session: Session,
   billId: string,
+  submittedAmountMinor?: number,
+  allowFlexibleAmounts = flexibleResidentV2PaymentAmountsEnabled,
 ): Promise<DirectUpiPaymentPreparation> {
   const s = await currentAuthority(session);
   if (s.role !== 'resident') throw Error('A resident account is required.');
@@ -446,7 +528,8 @@ export async function prepareDirectUpiPayment(
 
   const billSnapshot = await getDocFromServer(doc(firebase().db, 'bills', billId));
   const bill = billSnapshot.data();
-  if (bill?.schemaVersion === 2) return prepareV2DirectUpiPayment(s, billId, bill);
+  if (bill?.schemaVersion === 2)
+    return prepareV2DirectUpiPayment(s, billId, bill, submittedAmountMinor, allowFlexibleAmounts);
   if (
     !bill ||
     bill.communityId !== s.community.id ||
@@ -530,6 +613,8 @@ export async function submitProof(
   billId: string,
   file: File,
   transactionReference = '',
+  submittedAmountMinor?: number,
+  allowFlexibleAmounts = flexibleResidentV2PaymentAmountsEnabled,
 ) {
   const s = await currentAuthority(session);
   if (s.role !== 'resident') throw Error('A resident account is required.');
@@ -544,7 +629,16 @@ export async function submitProof(
   if (!types[ext] || file.size <= 0 || file.size >= 10 * 1024 * 1024)
     throw Error('Choose a JPG, PNG, HEIC or HEIF image smaller than 10 MB.');
   const bill = (await getDocFromServer(doc(firebase().db, 'bills', billId))).data();
-  if (bill?.schemaVersion === 2) return submitV2Proof(s, billId, file, transactionReference, bill);
+  if (bill?.schemaVersion === 2)
+    return submitV2Proof(
+      s,
+      billId,
+      file,
+      transactionReference,
+      bill,
+      submittedAmountMinor,
+      allowFlexibleAmounts,
+    );
   if (
     !bill ||
     bill.communityId !== s.community.id ||
