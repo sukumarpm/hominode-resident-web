@@ -74,6 +74,7 @@ export function querySpec(s: Session, m: Module): Spec {
     admins: 'admins',
   };
   if (m === 'communities' || m === 'admins') throw Error('A platform administrator is required.');
+  if (m === 'events') filters.push(['type', '==', 'event']);
   if (m === 'notifications')
     filters.push(
       ['recipientId', '==', s.uid],
