@@ -31,6 +31,7 @@ import {
   updateScoped,
 } from './actions';
 import { AdminCreateButtons, ResidentReview } from './AdminTools';
+import { EventImageGallery } from './components/EventImageGallery';
 import { ResidentBillPayment } from './components/ResidentBillPayment';
 import { VisitorQrPass } from './components/VisitorQrPass';
 import { Card, Modal, Pill, State } from './components';
@@ -1543,16 +1544,20 @@ function RecordDetails({
             : status(d)
         }
       />
+      {(module === 'events' || module === 'notices') && (
+        <EventImageGallery
+          key={`${s.uid}/${s.community?.id}/${row.id}`}
+          data={d}
+          title={titleOf(d)}
+        />
+      )}
       {module === 'facilities' ? (
         <div className="resident-facility-details">
           <FacilityGallery data={d} />
           <FacilityFields data={d} s={s} />
         </div>
       ) : module === 'payments' ? (
-        <PaymentRecordFields
-          data={d}
-          canonicalV2={row.source === 'residentBillingV2Payment'}
-        />
+        <PaymentRecordFields data={d} canonicalV2={row.source === 'residentBillingV2Payment'} />
       ) : (
         <DetailFields data={d} />
       )}

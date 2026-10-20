@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode, type ReactEventHandler } from 'react';
 import { Inbox, X, AlertCircle, ArrowUpRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { type Resource } from './data';
@@ -74,11 +74,13 @@ export function Modal({
   children,
   onClose,
   className,
+  onCancel,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   className?: string;
+  onCancel?: ReactEventHandler<HTMLDialogElement>;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const id = useId();
@@ -88,7 +90,7 @@ export function Modal({
     return () => el?.close();
   }, []);
   return (
-    <dialog ref={ref} aria-labelledby={id} onCancel={onClose} className={className}>
+    <dialog ref={ref} aria-labelledby={id} onCancel={onCancel ?? onClose} className={className}>
       <header className="dialog-heading">
         <h2 id={id}>{title}</h2>
         <button className="icon-button" aria-label="Close dialog" onClick={onClose}>
