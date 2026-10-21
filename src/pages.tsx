@@ -1,3 +1,4 @@
+import { ApartmentGallery, ProfilePhoto } from './privateImages';
 import { serverTimestamp } from 'firebase/firestore';
 import {
   ArrowRight,
@@ -1770,7 +1771,7 @@ export function ProfilePage({
       <div className="profile-grid">
         <Card>
           <div className="profile-heading">
-            <span className="avatar large">{s.profile.name.slice(0, 2).toUpperCase()}</span>
+            <ProfilePhoto data={s.profile.data} name={s.profile.name} large />
             <h2>{s.profile.name}</h2>
             <p>{s.community?.name || 'Hominode platform'}</p>
             <Pill value="active" />
@@ -1807,14 +1808,18 @@ export function ProfilePage({
 function ApartmentInfo({ s }: { s: Session }) {
   const unit = useRows(s, 'units');
   return (
-    <State resource={unit} empty="Your unit details are not available.">
-      {unit.rows.map((r) => (
-        <DetailFields data={r.data} key={r.id} />
-      ))}
-      <Link className="outline-link" to={pageBase(s) + 'vehicles'}>
-        My vehicles
-      </Link>
-    </State>
+    <>
+      <ApartmentGallery session={s} buildingId={s.profile.buildingId} title="Apartment photos" />
+      <ApartmentGallery session={s} />
+      <State resource={unit} empty="Your unit details are not available.">
+        {unit.rows.map((r) => (
+          <DetailFields data={r.data} key={r.id} />
+        ))}
+        <Link className="outline-link" to={pageBase(s) + 'vehicles'}>
+          My vehicles
+        </Link>
+      </State>
+    </>
   );
 }
 export function CommunityPage() {
