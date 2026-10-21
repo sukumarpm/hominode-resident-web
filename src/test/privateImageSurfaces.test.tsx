@@ -2,13 +2,17 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { type ReactNode } from 'react';
-import { ProfilePage } from '../pages';
+import { ProfilePage, ModulePage } from '../pages';
 import { AuthContext } from '../session';
 import { type Resource } from '../data';
 import { type Session } from '../models';
 import { makeSession } from './fixtures';
 
-const mock = vi.hoisted(() => ({ rows: [] as Resource['rows'] }));
+const mock = vi.hoisted(() => ({
+  rows: [] as Resource['rows'],
+  error: '',
+  modules: [] as string[],
+}));
 vi.mock('../firebase', () => ({
   call: vi.fn(),
   firebase: () => {
@@ -17,7 +21,10 @@ vi.mock('../firebase', () => ({
 }));
 vi.mock('../data', async () => ({
   ...(await vi.importActual<typeof import('../data')>('../data')),
-  useRows: () => ({ rows: mock.rows, loading: false, error: '' }),
+  useRows: (_session: Session, module: string) => {
+    mock.modules.push(module);
+    return { rows: mock.rows, loading: false, error: mock.error };
+  },
   useApartmentImages: () => ({ rows: [], loading: false, error: '' }),
   useAdminV2PaymentProofs: () => ({ rows: [], loading: false, error: '' }),
   useAdminV2RecurringSchedules: () => ({ rows: [], loading: false, error: '' }),
@@ -43,12 +50,17 @@ function wrap(child: ReactNode, s: Session = makeSession(), path = '/') {
 }
 beforeEach(() => {
   mock.rows = [];
+  mock.error = '';
+  mock.modules = [];
 });
 it('existing apartment page contains the scoped gallery and retains unit details/navigation', () => {
   mock.rows = [{ id: 'unit-1', data: { flatLabel: 'Tower A · 1203' } }];
   render(wrap(<ProfilePage apartment />));
   expect(screen.getByRole('heading', { name: 'My Apartment' })).toBeVisible();
-  expect(screen.getAllByText('No photos available.')).toHaveLength(2);
+  expect(screen.getAllByText('No photos available.')).toHaveLength(1);
+  expect(screen.queryByRole('region', { name: 'Community photos' })).not.toBeInTheDocument();
+  expect(mock.modules).toEqual(['buildings']);
+  expect(screen.getByText('Tower A · 1203')).toBeVisible();
   expect(screen.getByRole('link', { name: 'My vehicles' })).toHaveAttribute(
     'href',
     '/green-valley/vehicles',
@@ -65,4 +77,33 @@ it('Resident profile displays existing profile image and retains account details
   );
   expect(screen.getByRole('heading', { name: 'My Profile' })).toBeVisible();
   expect(screen.getByRole('button', { name: 'Sign out' })).toBeVisible();
+});
+
+it('profile aliases have one Name label, preserving a genuinely distinct full name', () => {
+  const s = makeSession();
+  s.profile.data = { ...s.profile.data, name: 'Maya Rao', fullName: 'Maya Rao' };
+  const view = render(wrap(<ProfilePage />, s));
+  expect(screen.getAllByText('Name', { selector: 'dt' })).toHaveLength(1);
+  expect(screen.queryByText('Full name', { selector: 'dt' })).not.toBeInTheDocument();
+  const changed = {
+    ...s,
+    profile: { ...s.profile, data: { ...s.profile.data, fullName: 'Maya Ramesh Rao' } },
+  };
+  view.rerender(wrap(<ProfilePage />, changed));
+  expect(screen.getByText('Full name', { selector: 'dt' })).toBeVisible();
+  expect(screen.getByText('Maya Ramesh Rao')).toBeVisible();
+});
+it('building permission failure remains contextual while independent photo state is shown', () => {
+  mock.error = 'Missing or insufficient permissions';
+  render(wrap(<ProfilePage apartment />));
+  expect(screen.getByRole('alert')).toHaveTextContent(
+    'Access to your building details could not be verified',
+  );
+  expect(screen.getByText('No photos available.')).toBeVisible();
+  expect(mock.modules).not.toContain('units');
+});
+it('existing Community module shows community gallery alongside its existing feed', () => {
+  render(wrap(<ModulePage module="community" />));
+  expect(screen.getByRole('region', { name: 'Community photos' })).toBeVisible();
+  expect(screen.queryByRole('region', { name: 'Building photos' })).not.toBeInTheDocument();
 });

@@ -1,3 +1,4 @@
+import { ResidentApartmentInfo, ResidentProfileDetails } from './ResidentApartment';
 import { ApartmentGallery, ProfilePhoto } from './privateImages';
 import { serverTimestamp } from 'firebase/firestore';
 import {
@@ -1122,6 +1123,7 @@ function ScopedModule({
           )}
         </div>
       </header>
+      {module === 'community' && <ApartmentGallery session={s} communityOnly />}
       <div className="module-summary">
         <span>
           <strong>{resource.loading ? '…' : resource.error ? '—' : resource.rows.length}</strong>{' '}
@@ -1776,7 +1778,7 @@ export function ProfilePage({
             <p>{s.community?.name || 'Hominode platform'}</p>
             <Pill value="active" />
           </div>
-          <DetailFields data={s.profile.data} />
+          <ResidentProfileDetails session={s} showAssignment={!apartment} />
         </Card>
         <Card title={apartment ? 'Your home' : 'Account access'}>
           {apartment && s.role === 'resident' ? (
@@ -1806,21 +1808,7 @@ export function ProfilePage({
   );
 }
 function ApartmentInfo({ s }: { s: Session }) {
-  const unit = useRows(s, 'units');
-  return (
-    <>
-      <ApartmentGallery session={s} buildingId={s.profile.buildingId} title="Apartment photos" />
-      <ApartmentGallery session={s} />
-      <State resource={unit} empty="Your unit details are not available.">
-        {unit.rows.map((r) => (
-          <DetailFields data={r.data} key={r.id} />
-        ))}
-        <Link className="outline-link" to={pageBase(s) + 'vehicles'}>
-          My vehicles
-        </Link>
-      </State>
-    </>
-  );
+  return <ResidentApartmentInfo session={s} />;
 }
 export function CommunityPage() {
   const { session: s } = useAuth();
