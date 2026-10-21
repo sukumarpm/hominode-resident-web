@@ -89,7 +89,7 @@ export function Login({ communityName }: { communityName?: string }) {
   return (
     <main className={'login-page ' + APP_ROLE}>
       <section className="login-story">
-        <img src="/images/logo.png" alt="Hominode" />
+        <img src="/branding/resident_transparent.png" alt="Hominode" />
         <div>
           <p className="eyebrow">SMART PLACE. BETTER LIVES.</p>
           <h1>
