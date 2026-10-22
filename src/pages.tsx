@@ -1123,7 +1123,12 @@ function ScopedModule({
           )}
         </div>
       </header>
-      {module === 'community' && <ApartmentGallery session={s} communityOnly />}
+      {module === 'community' && (
+        <>
+          <ApartmentGallery session={s} ownershipScope="COMMUNITY" />
+          <ApartmentGallery session={s} title="Legacy photos (read-only)" />
+        </>
+      )}
       <div className="module-summary">
         <span>
           <strong>{resource.loading ? '…' : resource.error ? '—' : resource.rows.length}</strong>{' '}

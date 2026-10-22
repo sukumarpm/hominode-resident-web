@@ -57,8 +57,10 @@ it('existing apartment page contains the scoped gallery and retains unit details
   mock.rows = [{ id: 'unit-1', data: { flatLabel: 'Tower A · 1203' } }];
   render(wrap(<ProfilePage apartment />));
   expect(screen.getByRole('heading', { name: 'My Apartment' })).toBeVisible();
-  expect(screen.getAllByText('No photos available.')).toHaveLength(1);
+  expect(screen.getAllByText('No photos available.')).toHaveLength(3);
   expect(screen.queryByRole('region', { name: 'Community photos' })).not.toBeInTheDocument();
+  expect(screen.getByRole('region', { name: 'Apartment photos' })).toBeVisible();
+  expect(screen.getByRole('region', { name: 'Legacy photos (read-only)' })).toBeVisible();
   expect(mock.modules).toEqual(['buildings']);
   expect(screen.getByText('Tower A · 1203')).toBeVisible();
   expect(screen.getByRole('link', { name: 'My vehicles' })).toHaveAttribute(
@@ -99,7 +101,7 @@ it('building permission failure remains contextual while independent photo state
   expect(screen.getByRole('alert')).toHaveTextContent(
     'Access to your building details could not be verified',
   );
-  expect(screen.getByText('No photos available.')).toBeVisible();
+  expect(screen.getAllByText('No photos available.')).toHaveLength(3);
   expect(mock.modules).not.toContain('units');
 });
 it('existing Community module shows community gallery alongside its existing feed', () => {

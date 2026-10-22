@@ -377,3 +377,62 @@ it('gallery denied reads remain contextual and never display stale photos', () =
   expect(document.body.textContent).not.toContain('private/path');
   expect(screen.queryByRole('img')).not.toBeInTheDocument();
 });
+it.each(['COMMUNITY', 'BUILDING', 'UNIT'] as const)(
+  'V2 %s displays only its scoped records and accepts canonical private assets',
+  async (scope) => {
+    const s = makeSession();
+    const resourceId =
+      scope === 'COMMUNITY'
+        ? s.community!.id
+        : scope === 'BUILDING'
+          ? s.profile.buildingId
+          : s.profile.flatId;
+    const scopedAsset = {
+      ...asset,
+      contractVersion: 2,
+      ownershipScope: scope,
+      resourceId,
+      ...(scope !== 'COMMUNITY' ? { buildingId: s.profile.buildingId } : {}),
+      ...(scope === 'UNIT' ? { unitId: s.profile.flatId } : {}),
+    };
+    const data = { ...scopedAsset, status: 'active', title: scope, imageAsset: scopedAsset };
+    mock.resource.rows = [
+      { id: 'own', data },
+      { id: 'foreign', data: { ...data, communityId: 'foreign' } },
+      { id: 'wrong', data: { ...data, resourceId: 'wrong' } },
+      {
+        id: 'old',
+        data: {
+          communityId: s.community!.id,
+          status: 'active',
+          imageUrl: 'https://example.invalid/legacy.jpg',
+        },
+      },
+    ];
+    mock.call.mockResolvedValue({ ...response(), asset: scopedAsset });
+    const view = render(
+      wrap(
+        <ApartmentGallery
+          session={s}
+          ownershipScope={scope}
+          buildingId={scope === 'COMMUNITY' ? undefined : s.profile.buildingId}
+        />,
+        s,
+      ),
+    );
+    expect(await screen.findByRole('img')).toHaveAttribute('alt', scope);
+    expect(screen.getByText('1 / 1')).toBeVisible();
+    view.unmount();
+  },
+);
+it('V2 malformed assets never fall back to historical URLs', () => {
+  expect(
+    apartmentImageReference({
+      contractVersion: 2,
+      ownershipScope: 'COMMUNITY',
+      resourceId: 'community-1',
+      communityId: 'community-1',
+      imageUrl: 'https://example.invalid/old.jpg',
+    }),
+  ).toBe('hominode-image:invalid');
+});

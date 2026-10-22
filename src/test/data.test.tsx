@@ -219,3 +219,28 @@ it('gallery listener clears on community change and permission loss without stal
   expect(result.current.loading).toBe(false);
   unmount();
 });
+it.each(['COMMUNITY', 'BUILDING', 'UNIT'] as const)(
+  'V2 %s queries use canonical assignment and clear denied results',
+  async (scope) => {
+    const { useApartmentImages } = await import('../data');
+    const firestore = await import('firebase/firestore');
+    const session = makeSession();
+    const resource =
+      scope === 'COMMUNITY'
+        ? session.community!.id
+        : scope === 'BUILDING'
+          ? session.profile.buildingId
+          : session.profile.flatId;
+    const { result, unmount } = renderHook(() => useApartmentImages(session, scope, resource));
+    expect(firestore.collection).toHaveBeenCalledWith(expect.anything(), 'apartmentImagesV2');
+    expect(firestore.where).toHaveBeenCalledWith('contractVersion', '==', 2);
+    expect(firestore.where).toHaveBeenCalledWith('ownershipScope', '==', scope);
+    expect(firestore.where).toHaveBeenCalledWith('resourceId', '==', resource);
+    if (scope === 'UNIT')
+      expect(firestore.where).toHaveBeenCalledWith('unitId', '==', session.profile.flatId);
+    const listener = m.listeners.at(-1)!;
+    act(() => listener.error(Error('permission-denied')));
+    expect(result.current.rows).toEqual([]);
+    unmount();
+  },
+);
