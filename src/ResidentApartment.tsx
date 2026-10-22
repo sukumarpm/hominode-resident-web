@@ -102,12 +102,6 @@ export function ResidentApartmentInfo({ session }: { session: Session }) {
       <ApartmentGallery
         session={session}
         buildingId={session.profile.buildingId}
-        ownershipScope="UNIT"
-        title="Apartment photos"
-      />
-      <ApartmentGallery
-        session={session}
-        buildingId={session.profile.buildingId}
         title="Legacy photos (read-only)"
       />
       <Link className="outline-link" to={`/${session.community!.slug}/vehicles`}>
