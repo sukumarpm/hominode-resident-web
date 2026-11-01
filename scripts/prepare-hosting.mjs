@@ -2,7 +2,7 @@ import { cp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 const hostingDist = resolve('dist');
-const marketingDist = resolve('../hominode/dist');
+const marketingDist = resolve('../hominde-web-portfolio/dist');
 
 // 1. Preserve the freshly built Resident SPA before replacing root index.html.
 await mkdir(join(hostingDist, '__resident_app'), { recursive: true });

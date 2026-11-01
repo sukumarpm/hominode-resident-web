@@ -2,7 +2,11 @@
   "hosting": {
     "target": "hominode_prod",
     "public": "dist",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
     "headers": [
       {
         "source": "/assets/**",
@@ -56,6 +60,10 @@
       },
       {
         "regex": "^/(?:admin|about|api|app|assets|auth|c|cdn|contact|docs|features|firebase|help|home|legal|login|mail|pricing|privacy|resident|static|status|support|super-admin|terms|www)(?:/.*)?$",
+        "destination": "/index.html"
+      },
+      {
+        "source": "/account-deletion",
         "destination": "/index.html"
       },
       {
