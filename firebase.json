@@ -52,11 +52,11 @@
     "rewrites": [
       {
         "source": "/privacy",
-        "destination": "/assets/HOMINODE_Privacy_Policy_v1.0.pdf"
+        "destination": "/policy.html"
       },
       {
         "source": "/policy",
-        "destination": "/assets/HOMINODE_Privacy_Policy_v1.0.pdf"
+        "destination": "/policy.html"
       },
       {
         "regex": "^/(?:admin|about|api|app|assets|auth|c|cdn|contact|docs|features|firebase|help|home|legal|login|mail|pricing|privacy|resident|static|status|support|super-admin|terms|www)(?:/.*)?$",
