@@ -15,6 +15,8 @@ import { getBlob, getMetadata, ref, uploadBytes } from 'firebase/storage';
 import { call, firebase } from './firebase';
 import { type Data, type DirectUpiPaymentPreparation, type Session, str } from './models';
 import { assertResident, assertScope, parseCommunity, parseProfile } from './policy';
+import { visitorArrival, visitorLocalTime, communityZone } from './residentVisitor';
+import type { InvitationResult } from './residentVisitorService';
 export async function currentAuthority(s: Session) {
   const f = firebase();
   const user = f.auth.currentUser;
@@ -404,21 +406,40 @@ export async function createComplaint(session: Session, values: Record<string, s
     updatedAt: serverTimestamp(),
   });
 }
-export async function createVisitor(session: Session, v: Record<string, string>) {
+export async function createVisitor(
+  session: Session,
+  v: Record<string, string>,
+  bringingPet = false,
+) {
   const s = await currentAuthority(session);
   if (s.role !== 'resident') throw Error('A resident account is required.');
-  const arrival = new Date(v.expectedArrival);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  if (!Number.isFinite(arrival.getTime()) || arrival < today)
+  if (typeof bringingPet !== 'boolean') throw Error('Pet disclosure must be a boolean.');
+  const zone =
+    typeof s.community.data.timeZone === 'string' ? s.community.data.timeZone : undefined;
+  const arrival = new Date(visitorArrival(v.expectedArrival, zone));
+  if (communityZone(zone) !== communityZone(session.community?.data.timeZone))
+    throw Error('Your community timezone changed. Reload the invitation form.');
+  const today = visitorLocalTime(Date.now(), zone).slice(0, 10);
+  if (!Number.isFinite(arrival.getTime()) || visitorLocalTime(arrival.getTime(), zone).slice(0, 10) < today)
     throw Error('Choose a valid arrival date from today onwards.');
-  return call<{ visitorId: string }>('createVisitorInvitation', {
+  const result = await call<InvitationResult>('createVisitorInvitation', {
     visitorName: required(v.visitorName, 'Visitor name'),
     purpose: required(v.purpose, 'Purpose'),
     expectedArrival: arrival.getTime(),
     phoneNumber: v.phoneNumber?.trim() || null,
     vehicleNumber: v.vehicleNumber?.trim() || null,
+    bringingPet,
   });
+  if (!result.visitorId || typeof result.visitorId !== 'string')
+    throw Error('The invitation could not be confirmed. Check your visitor list before retrying.');
+  // Creation responses can contain private credentials for old clients. Forms
+  // retain only the invitation reference/state and retrieve passes separately.
+  return {
+    visitorId: result.visitorId,
+    authorizationState: result.authorizationState,
+    authorizationRevision: result.authorizationRevision,
+    credentialsAvailable: result.credentialsAvailable,
+  };
 }
 export async function updateScoped(
   session: Session,
@@ -426,6 +447,8 @@ export async function updateScoped(
   id: string,
   fields: Data,
 ) {
+  if (collectionName === 'visitors')
+    throw Error('Use the Resident visitor cancellation or rescheduling action.');
   const s = await currentAuthority(session);
   const record = doc(firebase().db, collectionName, id);
   const data = (await getDocFromServer(record)).data();

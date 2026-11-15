@@ -1,7 +1,14 @@
 import { type Row, type Session } from '../src/models';
-export { safeUrl, titleOf } from '../src/data';
+export { safeUrl, titleOf, combineResidentPaymentResources } from '../src/data';
 export type { Resource, Module } from '../src/data';
 import { type Module, type Resource } from '../src/data';
+// Unrelated live resources remain empty in the offline visitor/navigation harness.
+export function useResidentV2Payments(): Resource {
+  return { rows: [], loading: false, error: '' };
+}
+export function useApartmentImages(): Resource {
+  return { rows: [], loading: false, error: '' };
+}
 const at = new Date('2026-09-02T10:24:00');
 export function useRows(s: Session, module: Module): Resource {
   const fixtures: Partial<Record<Module, Record<string, unknown>[]>> = {

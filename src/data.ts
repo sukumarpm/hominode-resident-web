@@ -42,6 +42,7 @@ export interface Spec {
   notices?: boolean;
   announcementFeed?: 'resident';
   residentV2Payments?: { communityId: string; residentId: string };
+  residentWall?: boolean;
 }
 export function querySpec(s: Session, m: Module): Spec {
   if (s.role === 'superAdmin') {
@@ -85,6 +86,7 @@ export function querySpec(s: Session, m: Module): Spec {
     );
   if (m === 'residents') filters.push(['role', '==', 'resident']);
   if (s.role === 'resident') {
+    if (m === 'community') return { collection: 'posts', filters: [], residentWall: true };
     if (['residents', 'parking', 'deliveries'].includes(m))
       throw Error(
         'This workflow is not yet available on the web. Please use the mobile app or contact management.',
@@ -103,7 +105,6 @@ export function querySpec(s: Session, m: Module): Spec {
       filters.push(['flatId', '==', s.profile.flatId]);
     if (['payments', 'bookings'].includes(m)) filters.push(['userId', '==', s.uid]);
     if (m === 'messages') filters.push(['participantIds', 'array-contains', s.uid]);
-    if (m === 'community') filters.push(['buildingId', '==', s.profile.buildingId]);
     if (m === 'documents')
       filters.push(['buildingId', '==', s.profile.buildingId], ['status', '==', 'published']);
     if (m === 'sos') filters.push(['residentUid', '==', s.uid]);
@@ -295,7 +296,72 @@ function subscribe(key: string, spec: Spec, notify: () => void) {
       error(e);
       stop();
     };
-    if (spec.announcementFeed) {
+    if (spec.residentWall) {
+      const [, , communityId] = JSON.parse(key) as string[];
+      let sequence = 0;
+      const refresh = () => {
+        const current = ++sequence;
+        emit({ rows: [], loading: true, error: '' });
+        void call<{ posts: unknown }>('readVisibleWall', {})
+          .then((result) => {
+            if (!active || current !== sequence) return;
+            if (!result || !Array.isArray(result.posts))
+              throw Error('Community Wall response is invalid.');
+            const rows: Row[] = result.posts.map((item: unknown) => {
+              if (!item || typeof item !== 'object' || Array.isArray(item))
+                throw Error('Community Wall response is invalid.');
+              const { id, createdAtMs, ...data } = item as Record<string, unknown>;
+              if (
+                typeof id !== 'string' ||
+                !id ||
+                (createdAtMs != null &&
+                  (typeof createdAtMs !== 'number' ||
+                    !Number.isFinite(createdAtMs) ||
+                    !Number.isFinite(new Date(createdAtMs).getTime())))
+              )
+                throw Error('Community Wall response is invalid.');
+              return {
+                id,
+                data: {
+                  ...data,
+                  ...(createdAtMs != null ? { createdAt: new Date(createdAtMs as number) } : {}),
+                },
+              };
+            });
+            rows.sort(
+              (a, b) =>
+                (dateOf(b.data.createdAt)?.getTime() || 0) -
+                (dateOf(a.data.createdAt)?.getTime() || 0),
+            );
+            emit({ rows, loading: false, error: '' });
+          })
+          .catch(() => {
+            if (active && current === sequence)
+              emit({
+                rows: [],
+                loading: false,
+                error: 'Community Wall is unavailable. Please try again.',
+              });
+          });
+      };
+      const unsubscribe = onSnapshot(
+        doc(firebase().db, 'moderationChanges', communityId),
+        refresh,
+        () => {
+          ++sequence;
+          emit({
+            rows: [],
+            loading: false,
+            error: 'Community Wall updates are unavailable. Please refresh.',
+          });
+        },
+      );
+      refresh();
+      stop = () => {
+        ++sequence;
+        unsubscribe();
+      };
+    } else if (spec.announcementFeed) {
       const [, uid, communityId, flatId] = JSON.parse(key) as string[];
       const canonical = new Map<string, Row>();
       const oldAnnouncements = new Map<string, Row>();
@@ -515,6 +581,7 @@ export function useRows(session: Session, module: Module, revision = 0): Resourc
     session.profile.flatId,
     config.spec,
     revision,
+    session.profile.buildingId,
   ]);
   const fallback = useMemo<Resource>(
     () => (config.error ? { rows: [], loading: false, error: config.error } : initial),

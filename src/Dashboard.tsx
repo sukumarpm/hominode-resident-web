@@ -19,6 +19,7 @@ import { useAuth } from './session';
 import { useRows, titleOf, safeUrl, type Resource } from './data';
 import { Card, State, Pill } from './components';
 import { type Session, type Row, amount, money, status, first, dateOf, dateLabel } from './models';
+import { visitorAuthorization, visitorPhysicalState } from './residentVisitor';
 function Metric({
   label,
   value,
@@ -76,8 +77,9 @@ export function RecordList({
                   dateLabel(row.data.createdAt),
                 )}
               </small>
+              {module === 'visitors' && <small>Authorization: {visitorAuthorization(row.data)}</small>}
             </div>
-            <Pill value={status(row.data)} />
+            <Pill value={module === 'visitors' ? visitorPhysicalState(row.data) : status(row.data)} />
           </Link>
         ))}
       </div>

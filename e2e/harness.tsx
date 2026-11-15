@@ -9,8 +9,10 @@ import { selectCommunity } from '../src/policy';
 import { type Session } from '../src/models';
 import { App } from '../src/App';
 import '../src/styles.css';
+import { ResidentVisitorHarness } from './ResidentVisitorHarness';
 function Harness() {
   const [session, setSession] = useState<Session | null>(makeSession(APP_ROLE));
+  if (location.pathname === '/__resident-visitor-test') return <ResidentVisitorHarness />;
   return (
     <AuthContext
       value={{

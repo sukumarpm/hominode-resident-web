@@ -1,0 +1,41 @@
+.resident-visitor-form,
+.resident-visitor-form fieldset {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.resident-visitor-form input {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+}
+.resident-visitor-form .resident-visitor-pet {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.resident-visitor-pet input {
+  width: auto;
+  flex: 0 0 auto;
+}
+.resident-visitor-actions p,
+.resident-visitor-form p,
+.visitor-qr-pass p {
+  overflow-wrap: anywhere;
+}
+.resident-visitor-actions .button-row {
+  flex-wrap: wrap;
+}
+.visitor-qr-pass svg {
+  max-width: 100%;
+  height: auto;
+}
+.visitor-qr-pass strong {
+  overflow-wrap: anywhere;
+}
+.module-card .resident-visitor-summary {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+  overflow-wrap: anywhere;
+}

@@ -1,3 +1,4 @@
+import { communityDate } from './residentVisitor';
 import { ResidentApartmentInfo, ResidentProfileDetails } from './ResidentApartment';
 import { ApartmentGallery, ProfilePhoto } from './privateImages';
 import { serverTimestamp } from 'firebase/firestore';
@@ -36,6 +37,10 @@ import { AdminCreateButtons, ResidentReview } from './AdminTools';
 import { EventImageGallery } from './components/EventImageGallery';
 import { ResidentBillPayment } from './components/ResidentBillPayment';
 import { VisitorQrPass } from './components/VisitorQrPass';
+import { ResidentVisitorForm } from './components/ResidentVisitorForm';
+import { ResidentVisitorActions } from './components/ResidentVisitorActions';
+import { ownVisitor } from './residentVisitorService';
+import { visitorAuthorization, visitorPhysicalState } from './residentVisitor';
 import { Card, Modal, Pill, State } from './components';
 import { PhoneNumberInput } from './components/PhoneNumberInput';
 import {
@@ -112,6 +117,7 @@ const details: Record<string, string> = {
   identityVerificationStatus: 'Identity verification',
   purpose: 'Purpose',
   expectedArrival: 'Expected arrival',
+  expectedTime: 'Expected arrival',
   actualArrival: 'Arrival',
   departure: 'Departure',
   visitorPassCode: 'Visitor pass',
@@ -152,11 +158,13 @@ function descriptionValue(key: string, value: unknown) {
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
 }
-export function DetailFields({ data }: { data: Data }) {
+export function DetailFields({ data, visitorZone }: { data: Data; visitorZone?: unknown }) {
   return (
     <dl className="detail-fields">
       {Object.entries(details).map(([key, label]) => {
-        const value = descriptionValue(key, data[key]);
+        if (visitorZone !== undefined && key === 'expectedTime' && data.expectedArrival != null) return null;
+        const value = visitorZone !== undefined && /At$|Date$|Arrival$|Time$|^departure$/.test(key)
+          ? communityDate(data[key], visitorZone) : descriptionValue(key, data[key]);
         return value && value !== '—' ? (
           <div key={key}>
             <dt>{label}</dt>
@@ -798,6 +806,7 @@ function ScopedModule({
   module: Module;
   routeName?: string;
 }) {
+  const [visitorFeedback, setVisitorFeedback] = useState('');
   const [revision, setRevision] = useState(0),
     [search, setSearch] = useState(''),
     [filter, setFilter] = useState('all'),
@@ -1215,15 +1224,21 @@ function ScopedModule({
                           <FileText />
                         )}
                       </span>
-                      <Pill value={status(row.data)} />
+                      <Pill
+                        value={
+                          module === 'visitors' ? visitorPhysicalState(row.data) : status(row.data)
+                        }
+                      />
                     </div>
                     <h3>
                       {row.source === 'residentBillingV2Payment'
                         ? first(row.data, ['transactionId'], 'Payment')
                         : titleOf(row.data)}
                     </h3>
-                    <p>
-                      {row.source === 'residentBillingV2Payment'
+                    <p className={module === 'visitors' ? 'resident-visitor-summary' : undefined}>
+                      {module === 'visitors'
+                        ? `${visitorAuthorization(row.data)} · ${str(row.data.purpose)}`
+                        : row.source === 'residentBillingV2Payment'
                         ? `${formatInrMinorUnits(row.data.amountMinor)} · ${paymentMethodLabel(row.data.method)}`
                         : first(
                             row.data,
@@ -1240,7 +1255,7 @@ function ScopedModule({
                           )}
                     </p>
                     <small>
-                      {dateLabel(
+                      {module === 'visitors' ? communityDate(row.data.expectedArrival ?? row.data.expectedTime, s.community?.data.timeZone) : dateLabel(
                         row.source === 'residentBillingV2Payment'
                           ? row.data.recordedAt
                           : (row.data.expectedArrival ?? row.data.date ?? row.data.createdAt),
@@ -1317,9 +1332,16 @@ function ScopedModule({
                         <td>{paymentMethodLabel(row.data.method ?? row.data.paymentMethod)}</td>
                       )}
                       <td>
-                        <Pill value={status(row.data)} />
+                        <Pill
+                          value={
+                            module === 'visitors'
+                              ? visitorPhysicalState(row.data)
+                              : status(row.data)
+                          }
+                        />
+                        {module === 'visitors' && <small>{visitorAuthorization(row.data)}</small>}
                       </td>
-                      <td>{dateLabel(row.data.updatedAt ?? row.data.createdAt)}</td>
+                      <td>{(module === 'visitors' ? communityDate(row.data.updatedAt ?? row.data.createdAt, s.community?.data.timeZone) : dateLabel(row.data.updatedAt ?? row.data.createdAt))}</td>
                       <td>
                         <button
                           className="text-button"
@@ -1359,7 +1381,24 @@ function ScopedModule({
       {selected && (
         <RecordDetails key={selected.id} s={s} module={module} row={selected} onClose={close} />
       )}{' '}
-      {create && <CreateForm s={s} module={module} onClose={close} />}
+      {module === 'visitors' && visitorFeedback && <p role="status">{visitorFeedback}</p>}
+      {create &&
+        (module === 'visitors' ? (
+          <ResidentVisitorForm
+            session={s}
+            onClose={close}
+            onSaved={(result) => {
+              setVisitorFeedback(
+                result.authorizationState === 'pending_admin'
+                  ? 'Invitation submitted. Waiting for your Community Admin; the pass is unavailable until authorized.'
+                  : 'Invitation created. Check its current status and pass in your visitor list.',
+              );
+              setRevision((v) => v + 1);
+            }}
+          />
+        ) : (
+          <CreateForm s={s} module={module} onClose={close} />
+        ))}
     </>
   );
 }
@@ -1467,6 +1506,7 @@ function RecordDetails({
   row: Row;
   onClose: () => void;
 }) {
+  const [visitorPassRevision, setVisitorPassRevision] = useState(0);
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(''),
     [reason, setReason] = useState(''),
@@ -1543,15 +1583,15 @@ function RecordDetails({
       className={module === 'payments' ? 'payment-details-dialog' : undefined}
       onClose={onClose}
     >
-      <Pill
+      {module !== 'visitors' && <Pill
         value={
           module === 'facilities'
-            ? d.isAvailable === true
-              ? 'Available'
-              : 'Unavailable'
-            : status(d)
+              ? d.isAvailable === true
+                ? 'Available'
+                : 'Unavailable'
+              : status(d)
         }
-      />
+      />}
       {(module === 'events' || module === 'notices') && (
         <EventImageGallery
           key={`${s.uid}/${s.community?.id}/${row.id}`}
@@ -1567,10 +1607,42 @@ function RecordDetails({
       ) : module === 'payments' ? (
         <PaymentRecordFields data={d} canonicalV2={row.source === 'residentBillingV2Payment'} />
       ) : (
-        <DetailFields data={d} />
+        <DetailFields
+          visitorZone={module === 'visitors' ? s.community?.data.timeZone ?? null : undefined}
+          data={
+            module === 'visitors'
+              ? Object.fromEntries(
+                  Object.entries(d).filter(([key]) =>
+                    [
+                      'visitorName',
+                      'purpose',
+                      'flatLabel',
+                      'expectedArrival',
+                      'expectedTime',
+                      'phoneNumber',
+                      'vehicleNumber',
+                      'actualArrival',
+                      'departure',
+                      'createdAt',
+                    ].includes(key),
+                  ),
+                )
+              : d
+          }
+        />
       )}
       {module === 'visitors' && s.role === 'resident' && (
-        <VisitorQrPass visitorId={row.id} data={d} />
+        <>
+          <ResidentVisitorActions
+            key={s.uid + ':' + s.community?.id + ':' + row.id}
+            session={s}
+            row={row}
+            onConfirmed={() => setVisitorPassRevision((v) => v + 1)}
+          />
+          {ownVisitor(s, d) && (
+            <VisitorQrPass key={visitorPassRevision} visitorId={row.id} data={d} session={s} />
+          )}
+        </>
       )}
       {module === 'complaints' && (
         <ol className="timeline">

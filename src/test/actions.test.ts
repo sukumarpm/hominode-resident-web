@@ -1,6 +1,8 @@
 import { beforeEach, it, expect, vi } from 'vitest';
 import { makeSession, residentData, adminData } from './fixtures';
 import { type Data } from '../models';
+import fs from 'node:fs';
+import path from 'node:path';
 const m = vi.hoisted(() => ({
   user: {
     uid: 'resident-1',
@@ -57,6 +59,7 @@ vi.mock('firebase/storage', () => ({
 import {
   createComplaint,
   createVisitor,
+  updateScoped,
   currentAuthority,
   residentNotificationDestination,
   prepareDirectUpiPayment,
@@ -145,7 +148,12 @@ it('creates complaints with canonical ownership and pending status', async () =>
 });
 it('creates visitor invitations through the protected callable without client-generated secrets', async () => {
   m.call.mockResolvedValue({ visitorId: 'visitor-1' });
-  await createVisitor(makeSession(), {
+  const session = makeSession();
+  session.community = { ...session.community!, data: { ...session.community!.data, timeZone: 'Asia/Manila' } };
+  m.get.mockImplementation(async (path: string) => ({ data: () =>
+    path.startsWith('communities/') ? { ...session.community!.data, name: 'Green Valley',
+      slug: 'green-valley', isActive: true } : m.profile }));
+  await createVisitor(session, {
     visitorName: 'Test Visitor',
     purpose: 'Friend',
     expectedArrival: '2099-09-09T12:00',
@@ -155,7 +163,7 @@ it('creates visitor invitations through the protected callable without client-ge
     expect.objectContaining({
       visitorName: 'Test Visitor',
       purpose: 'Friend',
-      expectedArrival: new Date('2099-09-09T12:00').getTime(),
+      expectedArrival: Date.parse('2099-09-09T04:00:00Z'),
     }),
   );
   const request = m.call.mock.calls[0][1];
@@ -164,6 +172,43 @@ it('creates visitor invitations through the protected callable without client-ge
   expect(request).not.toHaveProperty('communityId');
   expect(request).not.toHaveProperty('flatId');
   expect(m.add).not.toHaveBeenCalledWith('visitors', expect.anything());
+});
+it('matches the shared Resident creation contract and discards creation credentials', async () => {
+  const shared = JSON.parse(
+    fs.readFileSync(path.resolve('../lyvo1/docs/fixtures/resident_visitor_contract.json'), 'utf8'),
+  );
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-09T00:00:00Z'));
+  try {
+    m.get.mockImplementation(async (document: string) => ({
+      exists: () => true,
+      data: () => document.startsWith('communities/')
+        ? { name: 'Green Valley', slug: 'green-valley', isActive: true, timeZone: 'Asia/Manila' }
+        : m.profile,
+    }));
+    m.call.mockResolvedValue({ ...shared.pending, qrToken: 'private', visitorPassCode: 'private' });
+    const session = makeSession();
+    session.community = { ...session.community!, data: { ...session.community!.data, timeZone: 'Asia/Manila' } };
+    const result = await createVisitor(session, {
+      visitorName: shared.create.visitorName,
+      purpose: shared.create.purpose,
+      expectedArrival: '2026-11-10T08:00',
+    }, true);
+    expect(m.call).toHaveBeenCalledWith('createVisitorInvitation', shared.create);
+    expect(result).not.toHaveProperty('qrToken');
+    expect(result).not.toHaveProperty('visitorPassCode');
+    expect(result.authorizationState).toBe('pending_admin');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+it('blocks legacy visitor direct writes before Firestore access', async () => {
+  await expect(updateScoped(makeSession(), 'visitors', 'visitor-1', {
+    status: 'approved', isApproved: true, authorizationState: 'admin_authorized',
+    qrToken: 'forged', visitorPassCode: 'FORGED',
+  })).rejects.toThrow(/cancellation or rescheduling/);
+  expect(m.get).not.toHaveBeenCalled();
+  expect(m.update).not.toHaveBeenCalled();
 });
 it('refuses stale unit assignments before writing', async () => {
   m.profile = { ...residentData, flatId: 'different-unit' };
