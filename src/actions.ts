@@ -23,17 +23,24 @@ export async function currentAuthority(s: Session) {
   if (!user || user.uid !== s.uid) throw Error('Sign in again to continue.');
   const token = await user.getIdTokenResult();
   if (token.signInProvider !== 'phone') throw Error('Phone verification is required.');
-  const profileDoc = await getDocFromServer(
-    doc(f.db, s.role === 'resident' ? 'users' : 'admins', s.uid),
-  );
+  const id = assertScope(s);
+  // These authoritative documents are independent; fetch both from the
+  // server while retaining per-operation revocation and scope validation.
+  const [profileDoc, c] = await Promise.all([
+    getDocFromServer(doc(f.db, s.role === 'resident' ? 'users' : 'admins', s.uid)),
+    getDocFromServer(doc(f.db, 'communities', id)),
+  ]);
+  if (f.auth.currentUser !== user || f.auth.currentUser?.uid !== s.uid) {
+    throw Error('Sign in again to continue.');
+  }
+  if (!s.community || s.community.id !== id) throw Error('Your community changed. Sign in again.');
+  assertScope(s);
   const profile = parseProfile(
     s.uid,
     profileDoc.data() || {},
     s.role === 'resident' ? 'resident' : 'admin',
     user.phoneNumber || '',
   );
-  const id = assertScope(s);
-  const c = await getDocFromServer(doc(f.db, 'communities', id));
   const community = parseCommunity(id, c.data() || {});
   if (s.role === 'resident') {
     assertResident(profile, community);

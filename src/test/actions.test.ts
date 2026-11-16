@@ -28,7 +28,7 @@ const m = vi.hoisted(() => ({
   notification: {} as Data,
 }));
 vi.mock('../firebase', () => ({
-  firebase: () => ({ auth: { currentUser: m.user }, db: {}, storage: {} }),
+  firebase: () => ({ auth: { get currentUser() { return m.user; } }, db: {}, storage: {} }),
   call: m.call,
 }));
 vi.mock('firebase/firestore', () => ({
@@ -231,6 +231,61 @@ it('revalidates current admin assignments before mutations', async () => {
   };
   m.profile = { ...adminData, authorizedCommunityIds: ['community-2'] };
   await expect(currentAuthority(session)).rejects.toThrow('Community access revoked');
+});
+it('starts independent authority reads together and rejects either server read failure', async () => {
+  const session = makeSession();
+  let release: Array<(value: { exists: () => boolean; data: () => Data }) => void> = [];
+  m.get.mockImplementation(() => new Promise((resolve) => release.push(resolve)));
+  const pending = currentAuthority(session);
+  while (m.get.mock.calls.length < 2) await Promise.resolve();
+  expect(m.get).toHaveBeenCalledTimes(2);
+  release[0]({ exists: () => true, data: () => residentData });
+  release[1]({ exists: () => true, data: () => ({ name: 'Green Valley', slug: 'green-valley', isActive: true }) });
+  await expect(pending).resolves.toMatchObject({ uid: session.uid, community: { id: 'community-1' } });
+  m.get.mockImplementation(async (path: string) => {
+    if (path.startsWith('communities/')) throw Error('community read failed');
+    return { exists: () => true, data: () => residentData };
+  });
+  await expect(currentAuthority(session)).rejects.toThrow('community read failed');
+  m.get.mockImplementation(async (path: string) => {
+    if (!path.startsWith('communities/')) throw Error('profile read failed');
+    return { exists: () => true, data: () => ({ name: 'Green Valley', slug: 'green-valley', isActive: true }) };
+  });
+  await expect(currentAuthority(session)).rejects.toThrow('profile read failed');
+});
+it('rejects revoked resident community access using fresh profile and community documents', async () => {
+  const session = makeSession();
+  m.profile = { ...residentData, communityId: 'community-2' };
+  await expect(currentAuthority(session)).rejects.toThrow('selected community');
+  m.profile = { ...residentData };
+  m.get.mockImplementation(async (path: string) => ({
+    exists: () => true,
+    data: () => path.startsWith('communities/')
+      ? { name: 'Green Valley', slug: 'green-valley', isActive: false }
+      : residentData,
+  }));
+  await expect(currentAuthority(session)).rejects.toThrow('community is unavailable');
+});
+it('rejects authentication and community changes while authority reads are in flight', async () => {
+  const session = makeSession();
+  let release: Array<(value: { exists: () => boolean; data: () => Data }) => void> = [];
+  m.get.mockImplementation(() => new Promise((resolve) => release.push(resolve)));
+  const pending = currentAuthority(session);
+  while (m.get.mock.calls.length < 2) await Promise.resolve();
+  expect(m.get).toHaveBeenCalledTimes(2);
+  session.community = { ...session.community!, id: 'community-2' };
+  release[0]({ exists: () => true, data: () => residentData });
+  release[1]({ exists: () => true, data: () => ({ name: 'Green Valley', slug: 'green-valley', isActive: true }) });
+  await expect(pending).rejects.toThrow('community changed');
+  session.community = { ...session.community!, id: 'community-1' };
+  release = [];
+  m.get.mockClear();
+  const authPending = currentAuthority(session);
+  while (m.get.mock.calls.length < 2) await Promise.resolve();
+  m.user = { ...m.user!, uid: 'another-user' };
+  release[0]({ exists: () => true, data: () => residentData });
+  release[1]({ exists: () => true, data: () => ({ name: 'Green Valley', slug: 'green-valley', isActive: true }) });
+  await expect(authPending).rejects.toThrow('Sign in again');
 });
 it('routes only an owned Billing V2 payment notification to billing', async () => {
   m.notification = {
