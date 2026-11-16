@@ -178,8 +178,8 @@ export function VisitorQrPass({
             aria-label="Visitor gate QR code"
           />
           <p>
-            Show this QR or manual code to Security. The gate verifies current authorization before
-            check-in.
+            Pass availability confirmed under the current community policy. Show this QR or manual
+            code to Security. The gate verifies current authorization before check-in.
           </p>
           <p>
             Manual pass code: <strong>{String(credentials!.visitorPassCode)}</strong>

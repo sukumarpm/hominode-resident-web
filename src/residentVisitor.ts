@@ -3,7 +3,7 @@ import { dateOf, type Data } from './models';
 export const petVisitMessage =
   'Pets are not permitted for this visit. You may continue without a pet.';
 export const visitorWindowMs = 24 * 60 * 60 * 1000;
-const approvedStates = new Set(['auto_authorized', 'admin_authorized']);
+const requestableStates = new Set(['auto_authorized', 'admin_authorized', 'pending_admin']);
 export function visitorAuthorization(data: Data): string {
   switch (data.authorizationState) {
     case 'auto_authorized':
@@ -51,7 +51,9 @@ export function visitorPhysicalState(data: Data, now = Date.now()): string {
 }
 export function canRequestVisitorPass(data: Data, now = Date.now()): boolean {
   if (visitorPhysicalState(data, now) !== 'Expected') return false;
-  if (data.authorizationState != null && !approvedStates.has(String(data.authorizationState)))
+  // A stored pending state can outlive its policy. This permits only a server
+  // availability request; a valid getVisitorCredentials response grants display.
+  if (data.authorizationState != null && !requestableStates.has(String(data.authorizationState)))
     return false;
   if (data.authorizationManaged === true && data.authorizationState == null) return false;
   const arrival = dateOf(data.expectedArrival ?? data.expectedTime)?.getTime();
@@ -61,9 +63,7 @@ export function visitorPassMessage(data: Data, now = Date.now()) {
   const physical = visitorPhysicalState(data, now);
   if (physical !== 'Expected')
     return `This visitor pass is unavailable: ${physical.toLowerCase()}.`;
-  if (data.authorizationState === 'pending_admin')
-    return 'Waiting for your Community Admin. The pass will be available after authorization.';
-  if (data.authorizationManaged === true && !approvedStates.has(String(data.authorizationState)))
+  if (data.authorizationManaged === true && !requestableStates.has(String(data.authorizationState)))
     return 'This invitation is not authorized. Reload or contact your Community Admin.';
   return 'The pass is available within 24 hours before and after the expected arrival. Authorization is checked by the server.';
 }

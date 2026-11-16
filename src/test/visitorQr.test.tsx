@@ -41,7 +41,7 @@ describe('private Resident QR/manual pass', () => {
     expect(callMock).toHaveBeenCalledWith('getVisitorCredentials', { visitorId: 'visitor-1' });
     logs.forEach((log) => expect(log).not.toHaveBeenCalled());
   });
-  for (const state of ['pending_admin', 'rejected', 'revoked'])
+  for (const state of ['rejected', 'revoked', 'unknown'])
     it(`does not request or show credentials for ${state}`, async () => {
       const { container } = render(
         <VisitorQrPass
@@ -54,13 +54,17 @@ describe('private Resident QR/manual pass', () => {
       expect(screen.getByRole('status')).toBeInTheDocument();
     });
   it('refreshes on Admin approval and removes credentials immediately on revocation', async () => {
+    callMock.mockRejectedValueOnce(Object.assign(Error('Admin approval required'), {
+      code: 'functions/failed-precondition',
+    }));
     const view = render(
       <VisitorQrPass
         visitorId="visitor-1"
         data={{ ...row, authorizationState: 'pending_admin' }}
       />,
     );
-    expect(screen.getByRole('status')).toHaveTextContent('Waiting for your Community Admin');
+    await screen.findByText('Admin approval required');
+    expect(screen.queryByLabelText('Visitor gate QR code')).not.toBeInTheDocument();
     view.rerender(
       <VisitorQrPass
         visitorId="visitor-1"
@@ -148,11 +152,63 @@ describe('private Resident QR/manual pass', () => {
     callMock.mockRejectedValueOnce(Object.assign(Error('Admin approval required'), {
       code: 'functions/failed-precondition', details: { serverTime: 5000, revalidateAt: 6000 },
     }));
-    render(<VisitorQrPass visitorId="visitor-1" data={row} />);
+    render(<VisitorQrPass visitorId="visitor-1" data={{ ...row,
+      authorizationManaged: true, authorizationState: 'pending_admin' }} />);
     await act(async () => {});
     expect(screen.getByText('Admin approval required')).toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(screen.getByLabelText('Visitor gate QR code')).toBeInTheDocument();
+    expect(screen.getByText(/Pass availability confirmed under the current community policy/)).toBeInTheDocument();
+  });
+
+  it.each([
+    { enabled: false, approvalMode: 'all_approval_required' },
+    { enabled: true, approvalMode: 'resident_authorized' },
+  ])('rechecks stored pending invitations after policy relaxation: %j', async policy => {
+    const session = makeSession();
+    const data = { ...row, communityId: session.community!.id, hostUserId: session.uid,
+      authorizationManaged: true, authorizationState: 'pending_admin' };
+    const watchCommunity = () => () => {};
+    callMock.mockRejectedValueOnce(Object.assign(Error('Admin approval required'), {
+      code: 'functions/failed-precondition',
+    }));
+    const view = render(<VisitorQrPass visitorId="visitor-1" data={data} session={session}
+      watchCommunity={watchCommunity} />);
+    await screen.findByText('Admin approval required');
+    expect(screen.queryByLabelText('Visitor gate QR code')).not.toBeInTheDocument();
+    let finish!: (value: typeof credentials) => void;
+    callMock.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    view.rerender(<VisitorQrPass visitorId="visitor-1" data={data} session={{ ...session,
+      community: { ...session.community!, data: { ...session.community!.data,
+        visitorPolicy: { ...policy, revision: 5 } } },
+    }} watchCommunity={watchCommunity} />);
+    expect(screen.queryByLabelText('Visitor gate QR code')).not.toBeInTheDocument();
+    await act(async () => { finish(credentials); });
+    expect(screen.getByLabelText('Visitor gate QR code')).toBeInTheDocument();
+    expect(callMock).toHaveBeenCalledTimes(2);
+    expect(data.authorizationState).toBe('pending_admin');
+  });
+
+  it('discards a late pending-pass response after a newer policy denies availability', async () => {
+    const session = makeSession();
+    const data = { ...row, communityId: session.community!.id, hostUserId: session.uid,
+      authorizationManaged: true, authorizationState: 'pending_admin' };
+    const watchCommunity = () => () => {};
+    let finish!: (value: typeof credentials) => void;
+    callMock.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }))
+      .mockRejectedValueOnce(Object.assign(Error('Admin approval required'), {
+        code: 'functions/failed-precondition',
+      }));
+    const view = render(<VisitorQrPass visitorId="visitor-1" data={data} session={session}
+      watchCommunity={watchCommunity} />);
+    view.rerender(<VisitorQrPass visitorId="visitor-1" data={data} session={{ ...session,
+      community: { ...session.community!, data: { ...session.community!.data,
+        visitorPolicy: { enabled: true, approvalMode: 'all_approval_required', revision: 6 } } },
+    }} watchCommunity={watchCommunity} />);
+    await screen.findByText('Admin approval required');
+    await act(async () => { finish(credentials); });
+    expect(screen.queryByLabelText('Visitor gate QR code')).not.toBeInTheDocument();
+    expect(screen.queryByText(manual, { exact: false })).not.toBeInTheDocument();
   });
 
   it('does not display a response delayed beyond its server revalidation deadline', async () => {
@@ -186,12 +242,14 @@ describe('private Resident QR/manual pass', () => {
     expect(screen.queryByLabelText('Visitor gate QR code')).not.toBeInTheDocument();
   });
 
-  it.each([{ status: 'cancelled' }, { authorizationState: 'rejected' },
+  it.each([{ status: 'cancelled' }, { authorizationState: 'rejected' }, { authorizationState: 'revoked' },
+    { expectedArrival: new Date(now - 25 * 3600000) }, { status: 'unknown' },
     { checkInTime: new Date(now) }, { checkOutTime: new Date(now) }, { departure: new Date(now) }])
     ('removes an already displayed pass after a terminal or entry update: %j', async extra => {
-      const view = render(<VisitorQrPass visitorId="visitor-1" data={row} />);
+      const pending = { ...row, authorizationManaged: true, authorizationState: 'pending_admin' };
+      const view = render(<VisitorQrPass visitorId="visitor-1" data={pending} />);
       await screen.findByLabelText('Visitor gate QR code');
-      view.rerender(<VisitorQrPass visitorId="visitor-1" data={{ ...row, ...extra }} />);
+      view.rerender(<VisitorQrPass visitorId="visitor-1" data={{ ...pending, ...extra }} />);
       expect(screen.queryByLabelText('Visitor gate QR code')).not.toBeInTheDocument();
       expect(screen.queryByText(manual, { exact: false })).not.toBeInTheDocument();
     });
