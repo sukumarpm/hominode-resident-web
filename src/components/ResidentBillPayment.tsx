@@ -120,6 +120,7 @@ export function ResidentBillPayment({
     ReturnType<typeof prepareDirectUpiPayment>
   > | null>(null);
   const [preparing, setPreparing] = useState(false);
+  const [upiOpenedBefore, setUpiOpenedBefore] = useState(false);
   const [copyMessage, setCopyMessage] = useState('');
   const [proofOpen, setProofOpen] = useState(str(latestPayment?.status) === 'failed');
   const [file, setFile] = useState<File | null>(null);
@@ -150,7 +151,7 @@ export function ResidentBillPayment({
     : '';
 
   async function prepare({retry = false}: {retry?: boolean} = {}) {
-    if (retry && !window.confirm(
+    if ((retry || upiOpenedBefore) && !window.confirm(
       'Before retrying, check your UPI app and bank account to ensure the amount was not deducted. ' +
       'If the previous payment status is uncertain, do not pay again until you confirm.',
     )) return;
@@ -158,6 +159,7 @@ export function ResidentBillPayment({
     setMessage('');
     try {
       setPreparation(await prepareDirectUpiPayment(session, billId));
+      setUpiOpenedBefore(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'UPI payment could not be prepared.');
     } finally {
@@ -331,7 +333,15 @@ export function ResidentBillPayment({
                 )}
                 {proofOpen && (
                   <div className="payment-proof-submit">
-                    {paymentStatus === 'failed' && <h4>Submit new UPI payment proof</h4>}
+                    {paymentStatus === 'failed' && (
+                      <>
+                        <h4>Payment was rejected — retry safely</h4>
+                        <p>Before paying again, check that your bank account was not debited. If funds were deducted, contact your Community Admin instead of repeating payment.</p>
+                        <button type="button" disabled={preparing || uploading} onClick={() => void prepare({retry: true})}>
+                          {preparing ? 'Preparing UPI payment…' : 'Retry UPI payment'}
+                        </button>
+                      </>
+                    )}
                     <label>
                       Payment receipt image
                       <input
