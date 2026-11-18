@@ -8,16 +8,19 @@ const paymentActions = vi.hoisted(() => ({
   prepare: vi.fn(),
   submit: vi.fn(),
   latest: vi.fn(),
+  report: vi.fn(),
 }));
 
 vi.mock('../actions', () => ({
   prepareDirectUpiPayment: paymentActions.prepare,
   submitProof: paymentActions.submit,
   latestPaymentForBill: paymentActions.latest,
+  reportDirectUpiPayment: paymentActions.report,
 }));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  paymentActions.report.mockResolvedValue({ schemaVersion: 2, status: 'pending', evidenceType: 'bank_credit_report' });
   paymentActions.prepare.mockResolvedValue({
     billId: 'bill-1',
     amount: 1200.5,
@@ -418,4 +421,69 @@ it('keeps V1 behavior and billing list formatting unchanged', () => {
   );
   expect(screen.getByRole('button', { name: 'Pay via UPI' })).toBeInTheDocument();
   expect(screen.queryByText('Total')).not.toBeInTheDocument();
+});
+
+it('allows screenshot-free V2 UPI reporting only after resident confirmation', async () => {
+  const updated = vi.fn();
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  try {
+    render(
+      <ResidentBillPayment
+        session={makeSession()}
+        billId="bill-v2"
+        bill={v2Bill()}
+        latestPayment={null}
+        loading={false}
+        onPaymentUpdated={updated}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Already paid? Submit payment proof' }));
+    expect(screen.getByLabelText('Payment receipt image')).toBeInTheDocument();
+    const report = screen.getByRole('button', { name: 'I have paid — request bank verification' });
+    fireEvent.click(report);
+    await waitFor(() => expect(paymentActions.report).toHaveBeenCalledOnce());
+    expect(paymentActions.report).toHaveBeenCalledWith(expect.anything(), 'bill-v2');
+    await waitFor(() => expect(updated).toHaveBeenCalledOnce());
+    expect(paymentActions.submit).not.toHaveBeenCalled();
+    expect(screen.getByText(/Your bill is not yet paid/)).toBeInTheDocument();
+  } finally {
+    confirm.mockRestore();
+  }
+});
+
+it('does not record a V2 UPI payment report if resident cancels confirmation', () => {
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  try {
+    render(
+      <ResidentBillPayment
+        session={makeSession()}
+        billId="bill-v2"
+        bill={v2Bill()}
+        latestPayment={null}
+        loading={false}
+        onPaymentUpdated={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Already paid? Submit payment proof' }));
+    fireEvent.click(screen.getByRole('button', { name: 'I have paid — request bank verification' }));
+    expect(paymentActions.report).not.toHaveBeenCalled();
+  } finally {
+    confirm.mockRestore();
+  }
+});
+
+it('shows a pending bank report without offering receipt-upload recovery', () => {
+  render(
+    <ResidentBillPayment
+      session={makeSession()}
+      billId="bill-v2"
+      bill={v2Bill()}
+      latestPayment={{ schemaVersion: 2, status: 'pending', evidenceType: 'bank_credit_report', provider: 'direct_upi', method: 'upi' }}
+      loading={false}
+      onPaymentUpdated={vi.fn()}
+    />,
+  );
+  expect(screen.getByText(/Community bank verification is pending/)).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Resume receipt upload' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Pay via UPI' })).not.toBeInTheDocument();
 });
