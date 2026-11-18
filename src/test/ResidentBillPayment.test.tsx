@@ -487,3 +487,25 @@ it('shows a pending bank report without offering receipt-upload recovery', () =>
   expect(screen.queryByRole('button', { name: 'Resume receipt upload' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Pay via UPI' })).not.toBeInTheDocument();
 });
+
+it('requires deduction check before retrying a rejected UPI payment', async () => {
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  try {
+    render(
+      <ResidentBillPayment
+        session={makeSession()}
+        billId="bill-v2"
+        bill={v2Bill()}
+        latestPayment={{ schemaVersion: 2, status: 'failed', evidenceType: 'bank_credit_report' }}
+        loading={false}
+        onPaymentUpdated={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Retry UPI payment' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry UPI payment' }));
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(paymentActions.prepare).not.toHaveBeenCalled();
+  } finally {
+    confirm.mockRestore();
+  }
+});
