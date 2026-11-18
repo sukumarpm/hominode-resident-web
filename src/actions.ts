@@ -60,6 +60,24 @@ function minorAmountText(value: number): string {
   const paise = digits.slice(-2).padStart(2, '0');
   return `${whole}.${paise}`;
 }
+function directUpiMemo(billId: string, bill: Data): string {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const type = str(bill.type).toLowerCase().trim();
+  const purpose = type === 'maintenance' ? 'Maint' : type === 'electricity' ? 'Electric' : type === 'water' ? 'Water' : 'Bill';
+  let period: string | undefined;
+  if (typeof bill.billingPeriod === 'string' && /^20\d{2}-(0[1-9]|1[0-2])$/.test(bill.billingPeriod)) {
+    const month = Number(bill.billingPeriod.slice(5, 7));
+    period = `${months[month - 1]}${bill.billingPeriod.slice(2, 4)}`;
+  } else {
+    const ms = timestampMillis(bill.dueDate);
+    if (ms > 0) {
+      const due = new Date(ms);
+      period = `Due${months[due.getUTCMonth()]}${String(due.getUTCFullYear() % 100).padStart(2, '0')}`;
+    }
+  }
+  const ref = billId.replace(/[^a-zA-Z0-9]/g, '').slice(-6);
+  return ['HN', purpose, period, ref].filter(Boolean).join(' ');
+}
 function timestampMillis(value: unknown): number {
   if (value && typeof value === 'object') {
     if ('toMillis' in value && typeof value.toMillis === 'function')
@@ -376,7 +394,7 @@ async function prepareV2DirectUpiPayment(s: Session, billId: string, bill: Data)
     pn: payeeName,
     am: minorAmountText(amountMinor),
     cu: 'INR',
-    tn: `HN Bill ${billId.slice(0, 12)}`,
+    tn: directUpiMemo(billId, bill),
   });
   return {
     billId,
@@ -584,7 +602,7 @@ export async function prepareDirectUpiPayment(
     pn: payeeName,
     am: formattedAmount,
     cu: 'INR',
-    tn: `HN Bill ${billId.slice(0, 12)}`,
+    tn: directUpiMemo(billId, bill),
   });
   return {
     billId,
