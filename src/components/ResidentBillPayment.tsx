@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { latestPaymentForBill, prepareDirectUpiPayment, submitProof } from '../actions';
+import { latestPaymentForBill, prepareDirectUpiPayment, reportDirectUpiPayment, submitProof } from '../actions';
 import { Modal } from '../components';
 import {
   dateLabel,
@@ -125,6 +125,7 @@ export function ResidentBillPayment({
   const [file, setFile] = useState<File | null>(null);
   const [reference, setReference] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const [message, setMessage] = useState('');
   const [cashDetailsOpen, setCashDetailsOpen] = useState(false);
   const billStatus = str(bill.status).toLowerCase();
@@ -187,6 +188,28 @@ export function ResidentBillPayment({
     }
   }
 
+  async function reportWithoutScreenshot() {
+    if (reporting || uploading || !isV2 || pending || settled || !eligible) return;
+    const confirmed = window.confirm(
+      'Have you completed the Direct UPI payment to your community account? ' +
+      'This only reports your payment. The bill remains unpaid until the Community Admin verifies the receiving bank credit.',
+    );
+    if (!confirmed) return;
+    setReporting(true);
+    setMessage('');
+    try {
+      const report = await reportDirectUpiPayment(session, billId);
+      setPreparation(null);
+      setProofOpen(false);
+      onPaymentUpdated(report);
+      setMessage('Payment reported. The Community Admin will check the bank credit. Your bill is not yet paid.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not report your payment. Retry the same report.');
+    } finally {
+      setReporting(false);
+    }
+  }
+
   if (loading)
     return (
       <div className="payment-proof-status">
@@ -246,7 +269,7 @@ export function ResidentBillPayment({
                   {str(latestPayment.rejectionReason)}
                 </p>
               )}
-              {pending && <p>Admin verification is pending.</p>}
+              {pending && <p>{isV2 && latestPayment?.evidenceType === 'bank_credit_report' ? 'Payment reported. Community bank verification is pending; your bill remains unpaid.' : 'Admin verification is pending.'}</p>}
               {isV2 && paymentStatus === 'completed' && outstanding > 0 && (
                 <p>This payment is complete. The bill still has an outstanding balance.</p>
               )}
@@ -262,7 +285,7 @@ export function ResidentBillPayment({
                     ? 'Pay the exact outstanding amount using the community’s verified UPI details.'
                     : 'Pay the exact bill amount using the community’s verified UPI details.'}
                 </p>
-                {isV2 && pending && !proofOpen && (
+                {isV2 && pending && latestPayment?.evidenceType !== 'bank_credit_report' && !proofOpen && (
                   <button type="button" onClick={() => setProofOpen(true)}>
                     Resume receipt upload
                   </button>
@@ -327,11 +350,23 @@ export function ResidentBillPayment({
                         <small>{(file.size / 1024 / 1024).toFixed(2)} MB</small>
                       </div>
                     )}
+                    {isV2 && (
+                      <div className="payment-proof-status">
+                        <p>Screenshot and UPI reference are optional if the payment is complete. The Admin must verify the receiving bank credit.</p>
+                        <button
+                          type="button"
+                          disabled={uploading || reporting}
+                          onClick={() => void reportWithoutScreenshot()}
+                        >
+                          {reporting ? 'Reporting payment…' : 'I have paid — request bank verification'}
+                        </button>
+                      </div>
+                    )}
                     <div className="resident-bill-payment-actions">
                       <button
                         type="button"
                         className="primary"
-                        disabled={!file || uploading}
+                        disabled={!file || uploading || reporting}
                         onClick={() => void submit()}
                       >
                         {uploading
@@ -420,23 +455,32 @@ export function ResidentBillPayment({
               </div>
             </dl>
             <p className="direct-upi-note">
-              This QR code prepares your payment. Your bill will remain unpaid until management
-              reviews your payment proof.
+              This QR code prepares your payment. Your bill remains unpaid until the Community Admin
+              verifies the bank credit or reviews your uploaded receipt.
             </p>
             <div className="resident-bill-payment-actions">
               <button type="button" onClick={() => void copyVpa()}>
                 Copy UPI ID
               </button>
+              {isV2 && (
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={reporting}
+                  onClick={() => void reportWithoutScreenshot()}
+                >
+                  {reporting ? 'Reporting payment…' : 'I have paid — request bank verification'}
+                </button>
+              )}
               <button
                 type="button"
-                className="primary"
                 onClick={() => {
                   setPreparation(null);
                   setProofOpen(true);
                   setCopyMessage('');
                 }}
               >
-                I have paid – submit payment proof
+                I have paid – upload receipt (optional for V2)
               </button>
               <button
                 type="button"
