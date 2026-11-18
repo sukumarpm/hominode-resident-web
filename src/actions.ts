@@ -376,7 +376,7 @@ async function prepareV2DirectUpiPayment(s: Session, billId: string, bill: Data)
     pn: payeeName,
     am: minorAmountText(amountMinor),
     cu: 'INR',
-    tn: `Hominode bill ${billId.slice(-48)}`,
+    tn: `HN Bill ${billId.slice(0, 12)}`,
   });
   return {
     billId,
@@ -584,7 +584,7 @@ export async function prepareDirectUpiPayment(
     pn: payeeName,
     am: formattedAmount,
     cu: 'INR',
-    tn: `Hominode bill ${billId.slice(-48)}`,
+    tn: `HN Bill ${billId.slice(0, 12)}`,
   });
   return {
     billId,
