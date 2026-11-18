@@ -275,6 +275,74 @@ async function submitV2Proof(
     paymentReference: payload.paymentReference,
   };
 }
+/** Residents only report a payment; no ledger credit or receipt is created here. */
+export async function reportDirectUpiPayment(session: Session, billId: string) {
+  const s = await currentAuthority(session);
+  if (s.role !== 'resident') throw Error('A resident account is required.');
+  if (!billId.trim() || billId !== billId.trim() || billId.includes('/'))
+    throw Error('Invalid bill reference.');
+  const bill = (await getDocFromServer(doc(firebase().db, 'bills', billId))).data();
+  if (!bill || bill.schemaVersion !== 2)
+    throw Error('Bank verification without a screenshot requires a V2 bill.');
+  validateV2Bill(s, bill, billId);
+  const previous = await latestV2ProofForBill(s, billId);
+  if (previous?.status === 'pending') {
+    if (previous.evidenceType === 'bank_credit_report')
+      return previous;
+    throw Error('A receipt-based proof is already pending review for this bill.');
+  }
+  // Validate UPI configuration and pending proof constraints before reporting.
+  await prepareV2DirectUpiPayment(s, billId, bill);
+  const afterProofId = previous && ['failed', 'completed'].includes(str(previous.status))
+    ? str(previous.id)
+    : null;
+  const keyName = `hominode-v2-bank-report:${s.uid}:${s.community!.id}:${billId}`;
+  const stored = localStorage.getItem(keyName);
+  let idempotencyKey = '';
+  if (stored) {
+    try {
+      const parsed = JSON.parse(stored) as { key?: unknown; afterProofId?: unknown };
+      if (typeof parsed.key === 'string' && parsed.key && parsed.afterProofId === afterProofId)
+        idempotencyKey = parsed.key;
+    } catch {
+      // A corrupt local attempt cannot be trusted.
+    }
+  }
+  if (!idempotencyKey) {
+    idempotencyKey = crypto.randomUUID();
+    localStorage.setItem(keyName, JSON.stringify({ key: idempotencyKey, afterProofId }));
+  }
+  const result = await call<{ paymentId: string; receiptPath: null; status: string }>(
+    'reportDirectUpiPaymentV2',
+    {
+      billId,
+      submittedAmountMinor: bill.outstandingAmountMinor,
+      submittedBillRevisionId: bill.currentRevisionId,
+      idempotencyKey,
+      paymentReference: null,
+    },
+  );
+  if (!str(result.paymentId) || result.receiptPath !== null || result.status !== 'pending')
+    throw Error('Payment reporting could not be confirmed; retry the same report.');
+  localStorage.removeItem(keyName);
+  return {
+    schemaVersion: 2,
+    evidenceType: 'bank_credit_report',
+    id: result.paymentId,
+    communityId: s.community!.id,
+    residentId: s.uid,
+    userId: s.uid,
+    billId,
+    status: 'pending',
+    submittedAmountMinor: bill.outstandingAmountMinor,
+    submittedBillRevisionId: bill.currentRevisionId,
+    receiptPath: null,
+    paymentReference: null,
+    provider: 'direct_upi',
+    method: 'upi',
+  };
+}
+
 async function prepareV2DirectUpiPayment(s: Session, billId: string, bill: Data) {
   validateV2Bill(s, bill, billId);
   if (bill.outstandingAmountMinor === 0) throw Error('This bill has no outstanding balance.');
