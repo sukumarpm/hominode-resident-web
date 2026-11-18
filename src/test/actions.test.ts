@@ -186,14 +186,20 @@ it('prepares a URI from the authoritative bill and enabled community UPI config'
   const uri = new URL(prepared.paymentUri);
   expect(prepared.amount).toBe(850.5);
   expect(prepared.paymentUri).toBe(
-    'upi://pay?pa=greenvalley%40okaxis&pn=Green+Valley&am=850.50&cu=INR&tn=HN+Bill+bill-1',
+    'upi://pay?pa=greenvalley%40okaxis&pn=Green+Valley&am=850.50&cu=INR&tn=HN+Bill+bill1',
   );
   expect(uri.protocol).toBe('upi:');
   expect(uri.searchParams.get('pa')).toBe('greenvalley@okaxis');
   expect(uri.searchParams.get('pn')).toBe('Green Valley');
   expect(uri.searchParams.get('am')).toBe('850.50');
   expect(uri.searchParams.get('cu')).toBe('INR');
-  expect(uri.searchParams.get('tn')).toBe('HN Bill bill-1');
+  expect(uri.searchParams.get('tn')).toBe('HN Bill bill1');
+});
+
+it('uses the bill type and due month in a concise UPI memo', async () => {
+  m.bill = { ...m.bill, type: 'maintenance', dueDate: new Date('2026-10-31T00:00:00Z') };
+  const prepared = await prepareDirectUpiPayment(makeSession(), 'recurring_7e123456');
+  expect(new URL(prepared.paymentUri).searchParams.get('tn')).toBe('HN Maint DueOct26 123456');
 });
 
 it.each(['pending', 'overdue'])(
