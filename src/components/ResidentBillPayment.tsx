@@ -149,7 +149,11 @@ export function ResidentBillPayment({
         : paymentMethodLabel(latestPayment.method ?? latestPayment.paymentMethod)
     : '';
 
-  async function prepare() {
+  async function prepare({retry = false}: {retry?: boolean} = {}) {
+    if (retry && !window.confirm(
+      'Before retrying, check your UPI app and bank account to ensure the amount was not deducted. ' +
+      'If the previous payment status is uncertain, do not pay again until you confirm.',
+    )) return;
     setPreparing(true);
     setMessage('');
     try {
@@ -254,7 +258,7 @@ export function ResidentBillPayment({
                 {latestPaymentMethod}
               </p>
               <p>
-                <strong>Payment proof: </strong>
+                <strong>{isV2 && latestPayment?.evidenceType === 'bank_credit_report' ? 'Payment report: ' : 'Payment proof: '}</strong>
                 {paymentStatus === 'failed'
                   ? 'Rejected'
                   : paymentStatus === 'pending'
@@ -289,6 +293,14 @@ export function ResidentBillPayment({
                   <button type="button" onClick={() => setProofOpen(true)}>
                     Resume receipt upload
                   </button>
+                )}
+                {isV2 && paymentStatus === 'failed' && !proofOpen && (
+                  <div className="payment-proof-status">
+                    <p>Previous payment report or proof was rejected. Check whether money was deducted before paying again. If it was deducted, contact your Community Admin rather than paying twice.</p>
+                    <button type="button" disabled={preparing} onClick={() => void prepare({retry: true})}>
+                      {preparing ? 'Preparing UPI payment…' : 'Retry UPI payment'}
+                    </button>
+                  </div>
                 )}
                 {!pending && !proofOpen && (
                   <div className="resident-bill-payment-actions">
@@ -455,8 +467,13 @@ export function ResidentBillPayment({
               </div>
             </dl>
             <p className="direct-upi-note">
-              This QR code prepares your payment. Your bill remains unpaid until the Community Admin
-              verifies the bank credit or reviews your uploaded receipt.
+              The QR includes a bill-identifying memo where supported by your UPI app.
+              This is not proof of payment. Your bill remains unpaid until the Community
+              Admin verifies the bank credit.
+            </p>
+            <p className="direct-upi-note">
+              If the UPI app fails, times out or is closed, check for any amount deduction
+              before scanning again. If unsure, confirm with your bank or Community Admin.
             </p>
             <div className="resident-bill-payment-actions">
               <button type="button" onClick={() => void copyVpa()}>
